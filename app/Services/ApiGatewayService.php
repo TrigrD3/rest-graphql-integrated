@@ -94,9 +94,9 @@ class ApiGatewayService
     {
         try {
             $requestStartTime = microtime(true);
-            // Mulai pengukuran CPU dan Memory SEBELUM eksekusi
-            $startCpu = $this->systemMetricsService->getCpuUsage();
-            $startMemory = $this->systemMetricsService->getMemoryUsage();
+            // Track resource usage for this PHP process only
+            $usageSnapshot = $this->systemMetricsService->beginApplicationUsageSampling();
+            $usageMetrics = null;
             
             // Generate cache key yang lebih spesifik
             $cacheKey = $this->generateCacheKey($queryId, $repository);
@@ -109,50 +109,46 @@ class ApiGatewayService
                 'exists' => Cache::has($cacheKey),
                 'complexity' => $this->getQueryComplexity($queryId)
             ]);
-            
-            // Cek cache hanya jika user memilih untuk menggunakan cache
-            if ($useCache && Cache::has($cacheKey)) {
-                $result = Cache::get($cacheKey);
-                if ($result !== null) {
-                    $cacheStatus = 'HIT';
-                    \Log::info('Cache hit', ['key' => $cacheKey]);
-                    
-                    // Ukur CPU dan Memory setelah cache hit
-                    $endCpu = $this->systemMetricsService->getCpuUsage();
-                    $endMemory = $this->systemMetricsService->getMemoryUsage();
-                    
-                    $result['cpu_usage'] = max(0, $endCpu - $startCpu);
-                    $result['memory_usage'] = max(0, $endMemory - $startMemory);
-                    $result['complexity'] = $this->getQueryComplexity($queryId);
-                    
-                    $processingTime = round((microtime(true) - $requestStartTime) * 1000, 2);
-                    $originalRest = $result['rest_response_time_ms'] ?? null;
-                    $originalGraphql = $result['graphql_response_time_ms'] ?? null;
 
-                    $result['processing_time_ms'] = $processingTime;
-                    $result['served_from_cache'] = true;
-                    $result['cached_original_rest_response_time_ms'] = $originalRest;
-                    $result['cached_original_graphql_response_time_ms'] = $originalGraphql;
+            $cachedEntry = Cache::get($cacheKey);
+            $hasWinner = is_array($cachedEntry) && isset($cachedEntry['winner_api']);
+            $winnerPayload = $cachedEntry['winner_payload'] ?? null;
 
-                    $winner = $result['winner_api'] ?? null;
-                    if ($winner === 'rest') {
-                        $result['rest_response_time_ms'] = $processingTime;
-                        $result['graphql_response_time_ms'] = $originalGraphql;
-                    } elseif ($winner === 'graphql') {
-                        $result['rest_response_time_ms'] = $originalRest;
-                        $result['graphql_response_time_ms'] = $processingTime;
-                    } else {
-                        $result['rest_response_time_ms'] = $processingTime;
-                        $result['graphql_response_time_ms'] = $processingTime;
-                    }
+            if ($hasWinner) {
+                $winnerApi = $cachedEntry['winner_api'];
+                $refresh = $this->runWinnerOnly($winnerApi, $queryId, $repository, false);
+                $result = $refresh['result'];
+                $winnerPayload = $refresh['winner_payload'] ?? $winnerPayload;
+                $cacheStatus = $useCache ? 'WINNER_REFRESH' : 'DISABLED';
 
-                    // Log hasil cache hit untuk audit trail
-                    $this->logResult($result, $cacheStatus);
-
-                    return $this->formatResponse($result, $cacheStatus);
+                if ($usageSnapshot !== null) {
+                    $usageMetrics = $this->systemMetricsService->finishApplicationUsageSampling($usageSnapshot);
+                    $usageSnapshot = null;
+                    $this->applyUsageMetrics($result, $usageMetrics);
                 }
+
+                $processingTime = round((microtime(true) - $requestStartTime) * 1000, 2);
+                $result['processing_time_ms'] = $processingTime;
+                $result['complexity'] = $this->getQueryComplexity($queryId);
+                $result['cache_status'] = $cacheStatus;
+                $result['served_from_cache'] = false;
+                $result['cache_used'] = false;
+                $result['cached_original_rest_response_time_ms'] = $result['rest_response_time_ms'] ?? null;
+                $result['cached_original_graphql_response_time_ms'] = $result['graphql_response_time_ms'] ?? null;
+
+                if ($useCache && $winnerPayload) {
+                    Cache::put($cacheKey, [
+                        'winner_api' => $winnerApi,
+                        'winner_payload' => $winnerPayload,
+                        'stored_at' => now()->toIso8601String(),
+                    ], now()->addHours(1));
+                }
+
+                $this->logResult($result, $cacheStatus);
+
+                return $this->formatResponse($result, $cacheStatus);
             }
-            
+
             // Definisikan endpoint dan query berdasarkan queryId
             $endpoints = $this->getEndpointsForQuery($queryId, $repository);
             
@@ -226,14 +222,11 @@ class ApiGatewayService
             
             // Tentukan pemenang
             $winner = $this->determineWinner($restSucceeded, $graphqlSucceeded, $restTime, $graphqlTime);
-            
-            // Ukur CPU dan Memory SETELAH eksekusi
-            $endCpu = $this->systemMetricsService->getCpuUsage();
-            $endMemory = $this->systemMetricsService->getMemoryUsage();
-            
-            // Hitung delta CPU dan Memory usage sesuai rumus penelitian
-            $cpuUsage = max(0, $endCpu - $startCpu);
-            $memoryUsage = max(0, $endMemory - $startMemory);
+
+            if ($usageSnapshot !== null) {
+                $usageMetrics = $this->systemMetricsService->finishApplicationUsageSampling($usageSnapshot);
+                $usageSnapshot = null;
+            }
             
             // Format hasil dengan metrik performa
             $result = [
@@ -244,8 +237,6 @@ class ApiGatewayService
                 'rest_succeeded' => $restSucceeded,
                 'graphql_succeeded' => $graphqlSucceeded,
                 'winner_api' => $winner,
-                'cpu_usage' => $cpuUsage,
-                'memory_usage' => $memoryUsage,
                 'complexity' => $this->getQueryComplexity($queryId),
                 'response_data' => [
                     'rest' => $restData,
@@ -254,27 +245,53 @@ class ApiGatewayService
                     'graphql_error' => $graphqlData['errors'] ?? null
                 ]
             ];
+
+            if ($usageMetrics !== null) {
+                $this->applyUsageMetrics($result, $usageMetrics);
+            }
             
-            // Simpan ke cache hanya jika cache diaktifkan
-            if ($useCache) {
-                $cachePayload = $result;
-                unset(
-                    $cachePayload['processing_time_ms'],
-                    $cachePayload['served_from_cache'],
-                    $cachePayload['cached_original_rest_response_time_ms'],
-                    $cachePayload['cached_original_graphql_response_time_ms']
-                );
-                Cache::put($cacheKey, $cachePayload, now()->addHours(1));
-                \Log::info('Saving to cache', [
-                    'key' => $cacheKey,
-                    'expires' => now()->addHours(1)
-                ]);
+            // Simpan ke cache hanya jika cache diaktifkan dan ada pemenang
+            if ($useCache && $winner !== 'none') {
+                $winnerPayload = null;
+                if ($winner === 'rest') {
+                    $winnerPayload = [
+                        'api_type' => 'rest',
+                        'response_time_ms' => $restTime,
+                        'succeeded' => $restSucceeded,
+                        'response' => $restData,
+                        'error' => $restSucceeded ? null : ($restData['message'] ?? null),
+                        'stored_at' => now()->toIso8601String(),
+                    ];
+                } elseif ($winner === 'graphql') {
+                    $winnerPayload = [
+                        'api_type' => 'graphql',
+                        'response_time_ms' => $graphqlTime,
+                        'succeeded' => $graphqlSucceeded,
+                        'response' => $graphqlData,
+                        'error' => $graphqlSucceeded ? null : ($graphqlData['errors'] ?? null),
+                        'stored_at' => now()->toIso8601String(),
+                    ];
+                }
+
+                if ($winnerPayload) {
+                    Cache::put($cacheKey, [
+                        'winner_api' => $winner,
+                        'winner_payload' => $winnerPayload,
+                        'stored_at' => now()->toIso8601String(),
+                    ], now()->addHours(1));
+
+                    \Log::info('Saving winner payload to cache', [
+                        'key' => $cacheKey,
+                        'winner_api' => $winner,
+                    ]);
+                }
             }
             
             $result['processing_time_ms'] = round((microtime(true) - $requestStartTime) * 1000, 2);
             $result['served_from_cache'] = false;
             $result['cached_original_rest_response_time_ms'] = $result['rest_response_time_ms'];
             $result['cached_original_graphql_response_time_ms'] = $result['graphql_response_time_ms'];
+            $result['cache_status'] = $cacheStatus;
 
             // Log hasil ke database
             $this->logResult($result, $cacheStatus);
@@ -420,6 +437,219 @@ class ApiGatewayService
             'total_batch_time_ms' => round($totalBatchTime, 2),
             'complexity' => $this->getQueryComplexity($queryId),
             'timestamp' => now()->toIso8601String()
+        ];
+    }
+    
+    protected function applyUsageMetrics(array &$result, array $usageMetrics): void
+    {
+        $result['cpu_usage'] = round($usageMetrics['cpu_percent'] ?? 0, 2);
+        $result['cpu_time_ms'] = round(($usageMetrics['cpu_time_seconds'] ?? 0) * 1000, 2);
+        $result['memory_usage'] = round($usageMetrics['memory_percent'] ?? 0, 2);
+        $result['memory_usage_mb'] = round($usageMetrics['memory_megabytes'] ?? 0, 2);
+        $result['memory_usage_delta_mb'] = round($usageMetrics['memory_delta_megabytes'] ?? 0, 2);
+        $result['resource_usage_details'] = $usageMetrics;
+    }
+
+    /**
+     * Build a compact payload that represents the winning API response for caching.
+     */
+    protected function createWinnerPayload(string $apiType, array $apiResult, ?array $responseOverride = null): array
+    {
+        $response = $apiResult['response'] ?? $responseOverride;
+
+        return [
+            'api_type' => $apiType,
+            'response_time_ms' => $apiResult['response_time_ms'] ?? null,
+            'succeeded' => $apiResult['succeeded'] ?? false,
+            'response' => $response,
+            'error' => $apiResult['error'] ?? null,
+            'cache_status' => $apiResult['cache_status'] ?? null,
+            'cpu_usage' => $apiResult['cpu_usage'] ?? null,
+            'cpu_time_ms' => $apiResult['cpu_time_ms'] ?? null,
+            'memory_usage' => $apiResult['memory_usage'] ?? null,
+            'memory_usage_mb' => $apiResult['memory_usage_mb'] ?? null,
+            'memory_usage_delta_mb' => $apiResult['memory_usage_delta_mb'] ?? null,
+            'resource_usage_details' => $apiResult['resource_usage_details'] ?? null,
+            'stored_at' => now()->toIso8601String(),
+        ];
+    }
+
+    /**
+     * Convert a cached winner payload back into an integrated result array.
+     */
+    protected function buildResultFromWinnerPayload(string $queryId, ?string $repository, array $winnerPayload, array $options = []): array
+    {
+        $apiType = $winnerPayload['api_type'] ?? 'none';
+        $responseTime = $winnerPayload['response_time_ms'] ?? 0;
+        $succeeded = $winnerPayload['succeeded'] ?? false;
+        $response = $winnerPayload['response'] ?? null;
+        $error = $winnerPayload['error'] ?? null;
+
+        $servedFromCache = $options['served_from_cache'] ?? false;
+        $cacheStatus = $options['cache_status'] ?? ($servedFromCache ? 'HIT' : 'WINNER_ONLY');
+        $executionMode = $options['execution_mode'] ?? 'winner_only';
+
+        $restResponseTime = $apiType === 'rest' ? $responseTime : 0;
+        $graphqlResponseTime = $apiType === 'graphql' ? $responseTime : 0;
+
+        return [
+            'error' => false,
+            'query_id' => $queryId,
+            'repository' => $repository,
+            'winner_api' => $apiType,
+            'total_response_time_ms' => $responseTime,
+            'rest_response_time_ms' => $restResponseTime,
+            'graphql_response_time_ms' => $graphqlResponseTime,
+            'rest_succeeded' => $apiType === 'rest' ? $succeeded : false,
+            'graphql_succeeded' => $apiType === 'graphql' ? $succeeded : false,
+            'cache_used' => $servedFromCache,
+            'cache_stored' => false,
+            'cache_status' => $cacheStatus,
+            'execution_mode' => $executionMode,
+            'selected_api' => $apiType,
+            'served_from_cache' => $servedFromCache,
+            'response_data' => [
+                'rest' => $apiType === 'rest' ? $response : null,
+                'graphql' => $apiType === 'graphql' ? $response : null,
+            ],
+            'rest_error' => $apiType === 'rest' ? $error : null,
+            'graphql_error' => $apiType === 'graphql' ? $error : null,
+            'cached_original_rest_response_time_ms' => $restResponseTime,
+            'cached_original_graphql_response_time_ms' => $graphqlResponseTime,
+            'cpu_usage' => $winnerPayload['cpu_usage'] ?? null,
+            'cpu_time_ms' => $winnerPayload['cpu_time_ms'] ?? null,
+            'memory_usage' => $winnerPayload['memory_usage'] ?? null,
+            'memory_usage_mb' => $winnerPayload['memory_usage_mb'] ?? null,
+            'memory_usage_delta_mb' => $winnerPayload['memory_usage_delta_mb'] ?? null,
+            'resource_usage_details' => $winnerPayload['resource_usage_details'] ?? null,
+        ];
+    }
+
+    protected function createWinnerPayloadFromIntegratedResult(array $result): ?array
+    {
+        $winner = $result['winner_api'] ?? 'none';
+
+        if ($winner === 'rest') {
+            return [
+                'api_type' => 'rest',
+                'response_time_ms' => $result['rest_response_time_ms'] ?? null,
+                'succeeded' => $result['rest_succeeded'] ?? false,
+                'response' => $result['response_data']['rest'] ?? null,
+                'error' => $result['rest_error'] ?? null,
+                'cpu_usage' => $result['cpu_usage'] ?? null,
+                'cpu_time_ms' => $result['cpu_time_ms'] ?? null,
+                'memory_usage' => $result['memory_usage'] ?? null,
+                'memory_usage_mb' => $result['memory_usage_mb'] ?? null,
+                'memory_usage_delta_mb' => $result['memory_usage_delta_mb'] ?? null,
+                'resource_usage_details' => $result['resource_usage_details'] ?? null,
+                'stored_at' => now()->toIso8601String(),
+            ];
+        }
+
+        if ($winner === 'graphql') {
+            return [
+                'api_type' => 'graphql',
+                'response_time_ms' => $result['graphql_response_time_ms'] ?? null,
+                'succeeded' => $result['graphql_succeeded'] ?? false,
+                'response' => $result['response_data']['graphql'] ?? null,
+                'error' => $result['graphql_error'] ?? null,
+                'cpu_usage' => $result['cpu_usage'] ?? null,
+                'cpu_time_ms' => $result['cpu_time_ms'] ?? null,
+                'memory_usage' => $result['memory_usage'] ?? null,
+                'memory_usage_mb' => $result['memory_usage_mb'] ?? null,
+                'memory_usage_delta_mb' => $result['memory_usage_delta_mb'] ?? null,
+                'resource_usage_details' => $result['resource_usage_details'] ?? null,
+                'stored_at' => now()->toIso8601String(),
+            ];
+        }
+
+        return null;
+    }
+
+    /**
+     * Execute only the cached winning API to refresh data without rerunning both endpoints.
+     *
+     * @return array{result: array, winner_payload: array|null}
+     */
+    protected function runWinnerOnly(string $apiType, string $queryId, ?string $repository = null, bool $useCache = true): array
+    {
+        if ($apiType === 'rest') {
+            $usageSnapshot = $this->systemMetricsService->beginApplicationUsageSampling();
+            $restResult = $this->executeRestApi($queryId, $repository, $useCache);
+            $usageMetrics = null;
+            if ($usageSnapshot !== null) {
+                $usageMetrics = $this->systemMetricsService->finishApplicationUsageSampling($usageSnapshot);
+            }
+            $winnerPayload = $this->createWinnerPayload('rest', $restResult);
+            $integrated = $this->buildResultFromWinnerPayload($queryId, $repository, $winnerPayload, [
+                'served_from_cache' => ($restResult['cache_status'] ?? null) === 'HIT',
+                'cache_status' => $restResult['cache_status'] ?? ($useCache ? 'WINNER_ONLY' : 'DISABLED'),
+                'execution_mode' => 'winner_only_refresh',
+            ]);
+            $integrated['complexity'] = $this->getQueryComplexity($queryId);
+
+            $integrated['response_data']['rest'] = $restResult['response'] ?? null;
+            $integrated['rest_response_time_ms'] = $restResult['response_time_ms'] ?? 0;
+            $integrated['rest_succeeded'] = $restResult['succeeded'] ?? false;
+            $integrated['graphql_response_time_ms'] = 0;
+            $integrated['graphql_succeeded'] = false;
+            $integrated['rest_error'] = $restResult['error'] ?? null;
+            $integrated['cache_used'] = ($restResult['cache_status'] ?? null) === 'HIT';
+            if ($usageMetrics !== null) {
+                $this->applyUsageMetrics($integrated, $usageMetrics);
+            }
+
+            return [
+                'result' => $integrated,
+                'winner_payload' => $winnerPayload,
+            ];
+        }
+
+        if ($apiType === 'graphql') {
+            $usageSnapshot = $this->systemMetricsService->beginApplicationUsageSampling();
+            $graphqlResult = $this->executeGraphqlApi($queryId, $repository, $useCache);
+            $usageMetrics = null;
+            if ($usageSnapshot !== null) {
+                $usageMetrics = $this->systemMetricsService->finishApplicationUsageSampling($usageSnapshot);
+            }
+            $winnerPayload = $this->createWinnerPayload('graphql', $graphqlResult);
+            $integrated = $this->buildResultFromWinnerPayload($queryId, $repository, $winnerPayload, [
+                'served_from_cache' => ($graphqlResult['cache_status'] ?? null) === 'HIT',
+                'cache_status' => $graphqlResult['cache_status'] ?? ($useCache ? 'WINNER_ONLY' : 'DISABLED'),
+                'execution_mode' => 'winner_only_refresh',
+            ]);
+            $integrated['complexity'] = $this->getQueryComplexity($queryId);
+
+            $integrated['response_data']['graphql'] = $graphqlResult['response'] ?? null;
+            $integrated['graphql_response_time_ms'] = $graphqlResult['response_time_ms'] ?? 0;
+            $integrated['graphql_succeeded'] = $graphqlResult['succeeded'] ?? false;
+            $integrated['rest_response_time_ms'] = 0;
+            $integrated['rest_succeeded'] = false;
+            $integrated['graphql_error'] = $graphqlResult['error'] ?? null;
+            $integrated['cache_used'] = ($graphqlResult['cache_status'] ?? null) === 'HIT';
+            if ($usageMetrics !== null) {
+                $this->applyUsageMetrics($integrated, $usageMetrics);
+            }
+
+            return [
+                'result' => $integrated,
+                'winner_payload' => $winnerPayload,
+            ];
+        }
+
+        return [
+            'result' => [
+                'error' => true,
+                'query_id' => $queryId,
+                'repository' => $repository,
+                'winner_api' => 'none',
+                'message' => 'Winner API tidak valid untuk refresh',
+                'response_data' => [
+                    'rest' => null,
+                    'graphql' => null,
+                ],
+            ],
+            'winner_payload' => null,
         ];
     }
     
@@ -910,18 +1140,31 @@ class ApiGatewayService
     public function executeRestApi($queryId, ?string $repository = null, bool $useCache = false)
     {
         $lookupStart = microtime(true);
+        $usageSnapshot = $this->systemMetricsService->beginApplicationUsageSampling();
+        $usageMetrics = null;
+        $cacheKey = $this->generateCacheKey($queryId, $repository) . ':rest';
+
         try {
-            $cacheKey = $this->generateCacheKey($queryId, $repository) . ':rest';
             if ($useCache && Cache::has($cacheKey)) {
                 $cached = Cache::get($cacheKey);
                 if (is_array($cached)) {
                     $processingTime = round((microtime(true) - $lookupStart) * 1000, 2);
-                    return array_merge($cached, [
+                    $result = array_merge($cached, [
                         'response_time_ms' => $processingTime,
-                        'cache_status' => 'HIT',
                         'served_from_cache' => true,
                         'baseline_response_time_ms' => $cached['response_time_ms'] ?? null
                     ]);
+
+                    if ($usageSnapshot !== null) {
+                        $usageMetrics = $this->systemMetricsService->finishApplicationUsageSampling($usageSnapshot);
+                        $usageSnapshot = null;
+                        if ($usageMetrics !== null) {
+                            $this->applyUsageMetrics($result, $usageMetrics);
+                        }
+                    }
+
+                    $result['cache_status'] = 'HIT';
+                    return $result;
                 }
             }
             
@@ -932,7 +1175,7 @@ class ApiGatewayService
             $response = null;
             $error = null;
             $succeeded = false;
-            
+
             $httpResponse = Http::withHeaders([
                 'Authorization' => "Bearer {$this->githubToken}",
                 'Accept' => 'application/vnd.github.v3+json'
@@ -940,14 +1183,13 @@ class ApiGatewayService
 
             $response = $httpResponse->json();
             $succeeded = $httpResponse->successful();
-            
         } catch (\Exception $e) {
             $error = $e->getMessage();
             Log::error("REST API Error: {$e->getMessage()}", ['query_id' => $queryId]);
         }
 
         $endTime = microtime(true);
-        $responseTime = ($endTime - $startTime) * 1000; // konversi ke ms
+        $responseTime = ($endTime - ($startTime ?? $lookupStart)) * 1000; // konversi ke ms
 
         $result = [
             'response' => $response,
@@ -957,31 +1199,61 @@ class ApiGatewayService
             'served_from_cache' => false,
             'baseline_response_time_ms' => $responseTime
         ];
-        
-        if ($useCache && $succeeded) {
-            Cache::put($cacheKey, $result, now()->addMinutes(30));
+
+        if ($usageSnapshot !== null) {
+            $usageMetrics = $this->systemMetricsService->finishApplicationUsageSampling($usageSnapshot);
         }
 
-        return array_merge($result, [
-            'cache_status' => $useCache ? 'MISS' : 'DISABLED'
-        ]);
+        if ($usageMetrics !== null) {
+            $this->applyUsageMetrics($result, $usageMetrics);
+        }
+        
+        if ($useCache && $succeeded) {
+            $cachePayload = $result;
+            unset(
+                $cachePayload['cpu_usage'],
+                $cachePayload['cpu_time_ms'],
+                $cachePayload['memory_usage'],
+                $cachePayload['memory_usage_mb'],
+                $cachePayload['memory_usage_delta_mb'],
+                $cachePayload['resource_usage_details']
+            );
+            Cache::put($cacheKey, $cachePayload, now()->addMinutes(30));
+        }
+
+        $result['cache_status'] = $useCache ? 'MISS' : 'DISABLED';
+
+        return $result;
     }
 
     public function executeGraphqlApi($queryId, ?string $repository = null, bool $useCache = false)
     {
         $lookupStart = microtime(true);
+        $usageSnapshot = $this->systemMetricsService->beginApplicationUsageSampling();
+        $usageMetrics = null;
+        $cacheKey = $this->generateCacheKey($queryId, $repository) . ':graphql';
+
         try {
-            $cacheKey = $this->generateCacheKey($queryId, $repository) . ':graphql';
             if ($useCache && Cache::has($cacheKey)) {
                 $cached = Cache::get($cacheKey);
                 if (is_array($cached)) {
                     $processingTime = round((microtime(true) - $lookupStart) * 1000, 2);
-                    return array_merge($cached, [
+                    $result = array_merge($cached, [
                         'response_time_ms' => $processingTime,
-                        'cache_status' => 'HIT',
                         'served_from_cache' => true,
                         'baseline_response_time_ms' => $cached['response_time_ms'] ?? null
                     ]);
+
+                    if ($usageSnapshot !== null) {
+                        $usageMetrics = $this->systemMetricsService->finishApplicationUsageSampling($usageSnapshot);
+                        $usageSnapshot = null;
+                        if ($usageMetrics !== null) {
+                            $this->applyUsageMetrics($result, $usageMetrics);
+                        }
+                    }
+
+                    $result['cache_status'] = 'HIT';
+                    return $result;
                 }
             }
             
@@ -1012,7 +1284,7 @@ class ApiGatewayService
         }
 
         $endTime = microtime(true);
-        $responseTime = ($endTime - $startTime) * 1000; // konversi ke ms
+        $responseTime = ($endTime - ($startTime ?? $lookupStart)) * 1000; // konversi ke ms
 
         $result = [
             'response' => $response,
@@ -1022,14 +1294,31 @@ class ApiGatewayService
             'served_from_cache' => false,
             'baseline_response_time_ms' => $responseTime
         ];
-        
-        if ($useCache && $succeeded) {
-            Cache::put($cacheKey, $result, now()->addMinutes(30));
+
+        if ($usageSnapshot !== null) {
+            $usageMetrics = $this->systemMetricsService->finishApplicationUsageSampling($usageSnapshot);
         }
 
-        return array_merge($result, [
-            'cache_status' => $useCache ? 'MISS' : 'DISABLED'
-        ]);
+        if ($usageMetrics !== null) {
+            $this->applyUsageMetrics($result, $usageMetrics);
+        }
+        
+        if ($useCache && $succeeded) {
+            $cachePayload = $result;
+            unset(
+                $cachePayload['cpu_usage'],
+                $cachePayload['cpu_time_ms'],
+                $cachePayload['memory_usage'],
+                $cachePayload['memory_usage_mb'],
+                $cachePayload['memory_usage_delta_mb'],
+                $cachePayload['resource_usage_details']
+            );
+            Cache::put($cacheKey, $cachePayload, now()->addMinutes(30));
+        }
+
+        $result['cache_status'] = $useCache ? 'MISS' : 'DISABLED';
+
+        return $result;
     }
 
     public function getAvailableQueries()
@@ -1227,50 +1516,34 @@ class ApiGatewayService
     public function executeIntegratedApi(string $queryId, ?string $repository = null, bool $usePromiseAny = false, bool $useCache = true): array
     {
         $cacheKey = "api_comparison_{$queryId}";
+        $cachedPayload = Cache::get($cacheKey);
 
-        if ($useCache) {
-            $cacheStart = microtime(true);
-            $cachedPayload = Cache::get($cacheKey);
+        if (is_array($cachedPayload) && isset($cachedPayload['winner_api'])) {
+            $winnerApi = $cachedPayload['winner_api'];
+            $refresh = $this->runWinnerOnly($winnerApi, $queryId, $repository, false);
+            $result = $refresh['result'];
+            $winnerPayload = $refresh['winner_payload'] ?? ($cachedPayload['winner_payload'] ?? null);
 
-            if (is_array($cachedPayload) && isset($cachedPayload['winner_api'])) {
-                $elapsedMs = (int) round((microtime(true) - $cacheStart) * 1000);
+            $result['cache_used'] = false;
+            $result['served_from_cache'] = false;
+            $result['execution_mode'] = 'winner_only_refresh';
+            $result['cache_status'] = $useCache ? 'WINNER_REFRESH' : 'DISABLED';
 
-                Log::info('Using cached API comparison result', [
-                    'query_id' => $queryId,
-                    'winner_api' => $cachedPayload['winner_api'],
-                    'lookup_time_ms' => $elapsedMs
-                ]);
-
-                $result = $cachedPayload;
-                $result['cache_used'] = true;
-                $result['execution_mode'] = $result['execution_mode'] ?? 'cache_hit';
-                $result['total_response_time_ms'] = $elapsedMs;
-                $result['cache_status'] = 'HIT';
-
-                $winnerApi = $result['winner_api'] ?? 'none';
-                if ($winnerApi === 'rest') {
-                    $result['rest_response_time_ms'] = $elapsedMs;
-                    $result['graphql_response_time_ms'] = 0;
-                    $result['rest_succeeded'] = true;
-                    $result['graphql_succeeded'] = false;
-                } elseif ($winnerApi === 'graphql') {
-                    $result['rest_response_time_ms'] = 0;
-                    $result['graphql_response_time_ms'] = $elapsedMs;
-                    $result['rest_succeeded'] = false;
-                    $result['graphql_succeeded'] = true;
-                } else {
-                    $result['rest_response_time_ms'] = 0;
-                    $result['graphql_response_time_ms'] = 0;
-                    $result['rest_succeeded'] = false;
-                    $result['graphql_succeeded'] = false;
-                }
-
-                $result['cache_lookup_time_ms'] = $elapsedMs;
-
-                return $result;
+            if ($useCache && $winnerPayload) {
+                Cache::put($cacheKey, [
+                    'winner_api' => $winnerApi,
+                    'winner_payload' => $winnerPayload,
+                    'stored_at' => now()->toIso8601String(),
+                ], 300);
+                $result['cache_stored'] = true;
             }
+
+            return $result;
         }
-        
+
+        $usageSnapshot = $this->systemMetricsService->beginApplicationUsageSampling();
+        $usageMetrics = null;
+
         $result = $usePromiseAny
             ? $this->executeConcurrentApisWithPromiseAny($queryId, $repository)
             : $this->executeConcurrentApisWithHttpPool($queryId, $repository);
@@ -1279,23 +1552,32 @@ class ApiGatewayService
             return $result;
         }
 
-        $result['cache_used'] = $result['cache_used'] ?? false;
-        $result['cache_stored'] = $result['cache_stored'] ?? false;
+        $result['cache_used'] = false;
+        $result['cache_stored'] = false;
         $result['cache_status'] = $useCache ? 'MISS' : 'DISABLED';
 
-        if (!$result['error'] && $useCache && isset($result['winner_api']) && $result['winner_api'] !== 'none') {
-            $result['cache_stored'] = true;
-
-            $payloadToCache = $result;
-            $payloadToCache['cache_used'] = false;
-            $payloadToCache['cache_stored'] = false;
-            $payloadToCache['cached_at'] = now()->toIso8601String();
-
-            Cache::put($cacheKey, $payloadToCache, 300);
+        if ($usageSnapshot !== null) {
+            $usageMetrics = $this->systemMetricsService->finishApplicationUsageSampling($usageSnapshot);
         }
 
-        $result['cache_used'] = $useCache ? ($result['cache_used'] ?? false) : false;
-        $result['cache_stored'] = $useCache ? ($result['cache_stored'] ?? false) : false;
+        if ($usageMetrics !== null) {
+            $this->applyUsageMetrics($result, $usageMetrics);
+        }
+
+        if (!$result['error'] && $useCache && isset($result['winner_api']) && $result['winner_api'] !== 'none') {
+            $winnerPayload = $this->createWinnerPayloadFromIntegratedResult($result);
+
+            if ($winnerPayload) {
+                Cache::put($cacheKey, [
+                    'winner_api' => $result['winner_api'],
+                    'winner_payload' => $winnerPayload,
+                    'stored_at' => now()->toIso8601String(),
+                ], 300);
+
+                $result['cache_stored'] = true;
+            }
+        }
+
         $result['use_promise_any'] = $usePromiseAny;
 
         return $result;

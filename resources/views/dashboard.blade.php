@@ -143,6 +143,8 @@
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Waktu</th>
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">REST (ms)</th>
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">GraphQL (ms)</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">CPU (%)</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Memory (%)</th>
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Cache</th>
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Pemenang</th>
                         </tr>
@@ -197,20 +199,6 @@
                 </div>
             </div>
             
-            <div>
-                <label for="repository" class="block text-sm font-medium text-gray-700 mb-1">Repository (Opsional):</label>
-                <select id="repository" name="repository" class="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring focus:ring-primary-500 focus:ring-opacity-50">
-                    <option value="">-- Pilih Repository --</option>
-                    <option value="donnemartin/viz">donnemartin/viz</option>
-                    <option value="donnemartin/gitsome">donnemartin/gitsome</option>
-                    <option value="csurfer/gitsuggest">csurfer/gitsuggest</option>
-                    <option value="guyzmo/git-repo">guyzmo/git-repo</option>
-                    <option value="vdaubry/github-awards">vdaubry/github-awards</option>
-                    <option value="bibcure/arxivcheck">bibcure/arxivcheck</option>
-                    <option value="karpathy/arxiv-sanity-preserver">karpathy/arxiv-sanity-preserver</option>
-                </select>
-            </div>
-            
             <input type="hidden" id="cache" name="cache" value="1">
             
             <!-- Performance Testing Section -->
@@ -243,23 +231,6 @@
                         </button>
                     </div>
                 </div>
-                <div class="mt-3 text-sm text-blue-700 bg-blue-100 rounded p-3">
-                    <div class="font-semibold mb-2">📊 Metrik Performa API Gateway:</div>
-                    <div class="space-y-1">
-                        <div><strong>REST API:</strong> Direct endpoint call dengan minimal overhead</div>
-                        <div><strong>GraphQL API:</strong> Query-based dengan field selection</div>
-                        <div><strong>Integrated API:</strong> Cache cerdas yang memilih API tercepat secara otomatis berdasarkan riwayat performa</div>
-                    </div>
-                    <div class="mt-2 text-xs text-blue-600">
-                        ✨ <em>Algorithm: Request pertama → concurrent execution → cache fastest API type → subsequent requests → direct to fastest API</em>
-                    </div>
-                    <div class="mt-3 p-2 bg-blue-50 border-l-4 border-blue-400 text-xs">
-                        <div class="font-semibold text-blue-800 mb-1">🚀 Concurrent Execution Technologies:</div>
-                        <div><strong>Http::pool():</strong> True parallel execution menggunakan Laravel's async HTTP pool</div>
-                        <div><strong>Promise::any():</strong> Race condition untuk mendapatkan response tercepat</div>
-                        <div class="text-blue-500 mt-1"><em>* Sistem secara acak memilih teknologi concurrent execution untuk testing</em></div>
-                    </div>
-                </div>
             </div>
             
             <!-- Kolom baru untuk menampilkan REST Endpoints -->
@@ -271,36 +242,6 @@
             </div>
             
             <!-- Section untuk menampilkan detail Query -->
-            <div id="queryEndpointDetails" class="mt-4">
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <!-- REST Endpoint -->
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Rest</label>
-                        <div class="bg-gray-50 rounded p-3 border border-gray-300 min-h-[120px]">
-                            <code id="restEndpointUrl" class="text-sm text-gray-800 break-all"></code>
-                        </div>
-                    </div>
-                    
-                    <!-- GraphQL Query -->
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-2">GraphQL</label>
-                        <div class="bg-gray-50 rounded p-3 border border-gray-300 min-h-[120px] overflow-y-auto">
-                            <pre id="graphqlQuery" class="text-sm text-gray-800 whitespace-pre-wrap"></pre>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="flex justify-end">
-                <button type="submit" id="submitBtn" class="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 transition-colors duration-300 flex items-center">
-                    <i class="fas fa-play mr-2"></i>
-                    <span id="submitBtnText">Jalankan Pengujian</span>
-                    <svg id="loadingIcon" class="hidden animate-spin ml-2 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                </button>
-            </div>
         </form>
     </div>
     
@@ -947,6 +888,12 @@ function showResultModal(result) {
     } else if (cacheStatusRaw === 'MISS') {
         cacheStatusText = 'MISS (Fresh Fetch)';
         cacheStatusClass = 'text-green-700';
+    } else if (cacheStatusRaw === 'WINNER_REFRESH') {
+        cacheStatusText = 'Winner Re-run';
+        cacheStatusClass = 'text-indigo-700';
+    } else if (cacheStatusRaw === 'WINNER_ONLY') {
+        cacheStatusText = 'Winner Cached';
+        cacheStatusClass = 'text-blue-700';
     } else if (cacheStatusRaw === 'DISABLED') {
         cacheStatusText = 'Cache Disabled';
         cacheStatusClass = 'text-gray-500';
@@ -984,6 +931,12 @@ function showResultModal(result) {
     } else if (result.served_from_cache) {
         statusEl.textContent = 'Cache HIT - dilayani dari cache';
         statusEl.className = 'font-medium text-purple-600';
+    } else if (cacheStatusRaw === 'WINNER_REFRESH') {
+        statusEl.textContent = 'Winner re-run – only fastest API executed';
+        statusEl.className = 'font-medium text-indigo-700';
+    } else if (cacheStatusRaw === 'WINNER_ONLY') {
+        statusEl.textContent = 'Winner cached – only fastest API reused';
+        statusEl.className = 'font-medium text-blue-700';
     } else if (cacheStatusRaw === 'DISABLED') {
         statusEl.textContent = 'Cache dimatikan';
         statusEl.className = 'font-medium text-gray-600';
@@ -1522,16 +1475,29 @@ async function showTestDetails(queryId, testDate, apiType = 'all') {
                     : '-';
                 
                 const cacheLabel = (test.cache_status || 'MISS').toUpperCase();
-                const cacheClass = cacheLabel === 'HIT' || cacheLabel === 'CACHE_USED'
-                    ? 'bg-purple-100 text-purple-800'
-                    : cacheLabel === 'MISS'
-                        ? 'bg-gray-100 text-gray-800'
-                        : 'bg-yellow-100 text-yellow-800';
+                const cacheClass =
+                    cacheLabel === 'HIT' || cacheLabel === 'CACHE_USED'
+                        ? 'bg-purple-100 text-purple-800'
+                        : cacheLabel === 'MISS'
+                            ? 'bg-gray-100 text-gray-800'
+                            : cacheLabel === 'WINNER_REFRESH'
+                                ? 'bg-indigo-100 text-indigo-800'
+                                : cacheLabel === 'WINNER_ONLY'
+                                    ? 'bg-blue-100 text-blue-800'
+                                    : 'bg-yellow-100 text-yellow-800';
+                const cpuUsage = test.cpu_usage !== null && test.cpu_usage !== undefined
+                    ? Number(test.cpu_usage).toFixed(2) + '%'
+                    : '-';
+                const memoryUsage = test.memory_usage !== null && test.memory_usage !== undefined
+                    ? Number(test.memory_usage).toFixed(2) + '%'
+                    : '-';
 
                 row.innerHTML = `
                     <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${new Date(test.created_at).toLocaleString()}</td>
                     <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${restValue}</td>
                     <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${graphqlValue}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${cpuUsage}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${memoryUsage}</td>
                     <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                         <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${cacheClass}">
                             ${cacheLabel}

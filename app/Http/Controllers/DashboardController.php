@@ -244,9 +244,9 @@ class DashboardController extends Controller
                 $this->apiGatewayService->clearCacheForQuery($queryId, null);
             }
             
-            // Start measuring CPU and memory
-            $startCpuUsage = $this->systemMetricsService->getCpuUsage();
-            $startMemoryUsage = $this->systemMetricsService->getMemoryUsage();
+            // Measure CPU/memory usage for the Laravel process only
+            $usageSnapshot = $this->systemMetricsService->beginApplicationUsageSampling();
+            $usageMetrics = null;
             
             // Run the test
             $startTime = microtime(true);
@@ -263,17 +263,18 @@ class DashboardController extends Controller
             }
             
             $endTime = microtime(true);
-            
-            // End CPU and memory measurement
-            $endCpuUsage = $this->systemMetricsService->getCpuUsage();
-            $endMemoryUsage = $this->systemMetricsService->getMemoryUsage();
+
+            if ($usageSnapshot !== null) {
+                $usageMetrics = $this->systemMetricsService->finishApplicationUsageSampling($usageSnapshot);
+                $usageSnapshot = null;
+            }
             
             // Calculate average response time
             $avgResponseTime = array_sum($responseTimes) / count($responseTimes);
             
-            // Calculate CPU and memory usage
-            $cpuUsage = ($endCpuUsage + $startCpuUsage) / 2;
-            $memoryUsage = ($endMemoryUsage + $startMemoryUsage) / 2;
+            // Calculate CPU and memory usage (process scoped)
+            $cpuUsage = $usageMetrics['cpu_percent'] ?? 0;
+            $memoryUsage = $usageMetrics['memory_percent'] ?? 0;
             
             // Save the measurement result
             $metric = PerformanceMetric::create([
@@ -291,6 +292,10 @@ class DashboardController extends Controller
                 'success' => true,
                 'data' => array_merge($metricData, [
                     'cache_enabled' => $useCache,
+                    'cpu_time_ms' => isset($usageMetrics['cpu_time_seconds']) ? round($usageMetrics['cpu_time_seconds'] * 1000, 2) : null,
+                    'memory_usage_mb' => isset($usageMetrics['memory_megabytes']) ? round($usageMetrics['memory_megabytes'], 2) : null,
+                    'memory_usage_delta_mb' => isset($usageMetrics['memory_delta_megabytes']) ? round($usageMetrics['memory_delta_megabytes'], 2) : null,
+                    'resource_usage' => $usageMetrics,
                     'details' => [
                         'total_time' => ($endTime - $startTime) * 1000,
                         'response_times' => $responseTimes
@@ -609,6 +614,8 @@ class DashboardController extends Controller
                 'endpoint' => "Integrated Query {$result['query_id']}",
                 'cache_status' => $cacheStatus,
                 'winner_api' => $result['winner_api'] ?? 'integrated',
+                'cpu_usage' => $result['cpu_usage'] ?? 0,
+                'memory_usage' => $result['memory_usage'] ?? 0,
                 'rest_response_time_ms' => $result['rest_response_time_ms'] ?? 0,
                 'graphql_response_time_ms' => $result['graphql_response_time_ms'] ?? 0,
                 'rest_succeeded' => $result['rest_succeeded'] ?? false,
@@ -651,6 +658,8 @@ class DashboardController extends Controller
                 'endpoint' => "{$apiType} Query {$queryId}",
                 'cache_status' => $cacheStatus,
                 'winner_api' => $result['succeeded'] ? $apiType : 'none',
+                'cpu_usage' => $result['cpu_usage'] ?? 0,
+                'memory_usage' => $result['memory_usage'] ?? 0,
                 'rest_response_time_ms' => $apiType === 'rest' ? $responseTime : null,
                 'graphql_response_time_ms' => $apiType === 'graphql' ? $responseTime : null,
                 'rest_succeeded' => $apiType === 'rest' ? $result['succeeded'] : false,
@@ -671,7 +680,9 @@ class DashboardController extends Controller
             Log::info('Logged single API result to RequestLog', [
                 'query_id' => $queryId,
                 'api_type' => $apiType,
-                'succeeded' => $result['succeeded']
+                'succeeded' => $result['succeeded'],
+                'cpu_usage' => $result['cpu_usage'] ?? null,
+                'memory_usage' => $result['memory_usage'] ?? null
             ]);
         } catch (\Exception $e) {
             Log::error('Error logging single API result: ' . $e->getMessage(), [

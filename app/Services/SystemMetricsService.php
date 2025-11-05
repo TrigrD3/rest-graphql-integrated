@@ -89,6 +89,70 @@ class SystemMetricsService
     }
     
     /**
+     * Snapshot resource usage so we can measure application-only consumption during a test.
+     */
+    public function beginApplicationUsageSampling(): array
+    {
+        return [
+            'timestamp' => microtime(true),
+            'cpu_seconds' => $this->getProcessCpuSeconds(),
+            'memory_usage_bytes' => memory_get_usage(true),
+            'memory_peak_bytes' => memory_get_peak_usage(true),
+        ];
+    }
+    
+    /**
+     * Calculate CPU and memory usage for the current PHP process between begin/end calls.
+     *
+     * @param array $snapshot
+     * @return array{
+     *     cpu_percent: float,
+     *     cpu_time_seconds: float,
+     *     memory_percent: float,
+     *     memory_bytes: float,
+     *     memory_megabytes: float,
+     *     memory_delta_bytes: float,
+     *     memory_delta_megabytes: float
+     * }
+     */
+    public function finishApplicationUsageSampling(array $snapshot): array
+    {
+        $endTimestamp = microtime(true);
+        $elapsedSeconds = max($endTimestamp - ($snapshot['timestamp'] ?? $endTimestamp), 0.000001);
+        
+        $endCpuSeconds = $this->getProcessCpuSeconds();
+        $cpuSeconds = max($endCpuSeconds - ($snapshot['cpu_seconds'] ?? 0), 0);
+        $cpuPercent = min(($cpuSeconds / $elapsedSeconds) * 100, 100);
+        
+        $endUsageBytes = memory_get_usage(true);
+        $endPeakBytes = memory_get_peak_usage(true);
+        $currentUsageBytes = max($endUsageBytes, $endPeakBytes);
+        
+        $baselineUsage = max(
+            $snapshot['memory_usage_bytes'] ?? 0,
+            $snapshot['memory_peak_bytes'] ?? 0
+        );
+        $additionalBytes = max($currentUsageBytes - $baselineUsage, 0);
+        
+        $memoryLimit = $this->getMemoryLimit();
+        if ($memoryLimit > 0 && $memoryLimit !== PHP_INT_MAX) {
+            $memoryPercent = min(($currentUsageBytes / $memoryLimit) * 100, 100);
+        } else {
+            $memoryPercent = $currentUsageBytes > 0 ? 100.0 : 0.0;
+        }
+        
+        return [
+            'cpu_percent' => $cpuPercent,
+            'cpu_time_seconds' => $cpuSeconds,
+            'memory_percent' => $memoryPercent,
+            'memory_bytes' => $currentUsageBytes,
+            'memory_megabytes' => $currentUsageBytes / 1048576,
+            'memory_delta_bytes' => $additionalBytes,
+            'memory_delta_megabytes' => $additionalBytes / 1048576,
+        ];
+    }
+    
+    /**
      * Mengukur penggunaan CPU di Windows menggunakan WMI
      * 
      * @return float Persentase penggunaan CPU
@@ -329,5 +393,21 @@ class SystemMetricsService
             default:
                 return (int)$memoryLimit;
         }
+    }
+    
+    /**
+     * Mengambil akumulasi waktu CPU (user + system) untuk proses PHP saat ini.
+     */
+    private function getProcessCpuSeconds(): float
+    {
+        if (!function_exists('getrusage')) {
+            return 0.0;
+        }
+        
+        $usage = getrusage();
+        $userSeconds = ($usage['ru_utime.tv_sec'] ?? 0) + ($usage['ru_utime.tv_usec'] ?? 0) / 1_000_000;
+        $systemSeconds = ($usage['ru_stime.tv_sec'] ?? 0) + ($usage['ru_stime.tv_usec'] ?? 0) / 1_000_000;
+        
+        return $userSeconds + $systemSeconds;
     }
 } 

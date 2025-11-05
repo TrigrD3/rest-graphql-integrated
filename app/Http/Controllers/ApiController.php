@@ -48,9 +48,9 @@ class ApiController extends Controller
                 'jmeter_test_id' => $jmeterTestId
             ]);
             
-            // Mulai pengukuran CPU dan memory
-            $startCpuUsage = $this->systemMetricsService->getCpuUsage();
-            $startMemoryUsage = $this->systemMetricsService->getMemoryUsage();
+            // Mulai pengukuran resource khusus proses aplikasi
+            $usageSnapshot = $this->systemMetricsService->beginApplicationUsageSampling();
+            $usageMetrics = null;
             
             // Jalankan pengujian
             $startTime = microtime(true);
@@ -70,16 +70,17 @@ class ApiController extends Controller
             
             $endTime = microtime(true);
             
-            // Akhiri pengukuran CPU dan memory
-            $endCpuUsage = $this->systemMetricsService->getCpuUsage();
-            $endMemoryUsage = $this->systemMetricsService->getMemoryUsage();
+            if ($usageSnapshot !== null) {
+                $usageMetrics = $this->systemMetricsService->finishApplicationUsageSampling($usageSnapshot);
+                $usageSnapshot = null;
+            }
             
             // Hitung rata-rata waktu respons
             $avgResponseTime = array_sum($responseTimes) / count($responseTimes);
             
-            // Hitung penggunaan CPU dan memory
-            $cpuUsage = ($endCpuUsage + $startCpuUsage) / 2;
-            $memoryUsage = ($endMemoryUsage + $startMemoryUsage) / 2;
+            // Hitung penggunaan CPU dan memory (khusus aplikasi)
+            $cpuUsage = $usageMetrics['cpu_percent'] ?? 0;
+            $memoryUsage = $usageMetrics['memory_percent'] ?? 0;
             
             // Simpan hasil pengukuran jika ini adalah bagian dari pengujian JMeter
             if ($jmeterTestId) {
@@ -112,6 +113,10 @@ class ApiController extends Controller
                     'cpu_usage_percent' => $cpuUsage,
                     'memory_usage_percent' => $memoryUsage,
                     'total_time_ms' => ($endTime - $startTime) * 1000,
+                    'cpu_time_ms' => isset($usageMetrics['cpu_time_seconds']) ? round($usageMetrics['cpu_time_seconds'] * 1000, 2) : null,
+                    'memory_usage_mb' => isset($usageMetrics['memory_megabytes']) ? round($usageMetrics['memory_megabytes'], 2) : null,
+                    'memory_usage_delta_mb' => isset($usageMetrics['memory_delta_megabytes']) ? round($usageMetrics['memory_delta_megabytes'], 2) : null,
+                    'resource_usage' => $usageMetrics,
                     'last_response' => !empty($responses) ? end($responses) : null
                 ]
             ]);
