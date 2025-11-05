@@ -65,18 +65,6 @@
                 <a href="/" class="nav-link px-4 py-2 text-gray-700 font-medium {{ request()->is('/') ? 'active-nav-link' : '' }}">
                     <i class="fas fa-tachometer-alt mr-2"></i>Dashboard
                 </a>
-                <a href="/repositories" class="nav-link px-4 py-2 text-gray-700 font-medium {{ request()->is('repositories') ? 'active-nav-link' : '' }}">
-                    <i class="fas fa-code-branch mr-2"></i>Repository
-                </a>
-                <a href="/performance" class="nav-link px-4 py-2 text-gray-700 font-medium {{ request()->is('performance') ? 'active-nav-link' : '' }}">
-                    <i class="fas fa-chart-line mr-2"></i>Metrik
-                </a>
-                <a href="/logs" class="nav-link px-4 py-2 text-gray-700 font-medium {{ request()->is('logs') ? 'active-nav-link' : '' }}">
-                    <i class="fas fa-list-alt mr-2"></i>Log
-                </a>
-                <a href="/documentation" class="nav-link px-4 py-2 text-gray-700 font-medium {{ request()->is('documentation') ? 'active-nav-link' : '' }}">
-                    <i class="fas fa-book mr-2"></i>Dokumentasi
-                </a>
                 <a href="{{ route('reports.summary') }}" class="text-gray-300 hover:bg-gray-700 hover:text-white px-3 py-2 rounded-md text-sm font-medium {{ request()->routeIs('reports.summary') ? 'bg-gray-900 text-white' : '' }}">
                     <i class="fas fa-chart-line mr-2"></i>
                     Laporan Kesimpulan
@@ -98,9 +86,6 @@
                     <p class="text-gray-600">&copy; {{ date('Y') }} API Gateway Testing. Hak Cipta Dilindungi.</p>
                 </div>
                 <div class="flex space-x-4">
-                    <a href="/documentation" class="text-gray-600 hover:text-primary-600">
-                        <i class="fas fa-book mr-1"></i>Dokumentasi
-                    </a>
                     <a href="https://github.com" target="_blank" class="text-gray-600 hover:text-primary-600">
                         <i class="fab fa-github mr-1"></i>GitHub
                     </a>

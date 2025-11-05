@@ -233,101 +233,10 @@
                 </div>
             </div>
             
-            <!-- Kolom baru untuk menampilkan REST Endpoints -->
-            <div id="repoEndpoints" class="hidden">
-                <label class="block text-sm font-medium text-gray-700 mb-2">REST Endpoints untuk Repository:</label>
-                <div class="bg-gray-50 rounded-lg p-4 border border-gray-200">
-                    <ul id="repoEndpointsList" class="list-disc list-inside text-sm text-gray-700 space-y-1"></ul>
-                </div>
-            </div>
-            
             <!-- Section untuk menampilkan detail Query -->
         </form>
     </div>
     
-    <div class="bg-white rounded-lg shadow-md p-6">
-        <h2 class="text-xl font-semibold mb-4 flex items-center">
-            <i class="fas fa-info-circle text-primary-600 mr-2"></i>
-            Statistik Sistem
-        </h2>
-        
-        <div class="space-y-4">
-            <div>
-                <div class="flex justify-between mb-1">
-                    <span class="text-sm font-medium text-gray-700">Penggunaan CPU</span>
-                    <span class="text-sm font-medium text-gray-700">{{ $metrics['cpu_usage'] }}%</span>
-                </div>
-                <div class="w-full bg-gray-200 rounded-full h-2">
-                    <div class="bg-primary-600 h-2 rounded-full" style="width: {{ $metrics['cpu_usage'] }}%"></div>
-                </div>
-            </div>
-            
-            <div>
-                <div class="flex justify-between mb-1">
-                    <span class="text-sm font-medium text-gray-700">Penggunaan Memori</span>
-                    <span class="text-sm font-medium text-gray-700">{{ $metrics['memory_usage'] }}%</span>
-                </div>
-                <div class="w-full bg-gray-200 rounded-full h-2">
-                    <div class="bg-primary-600 h-2 rounded-full" style="width: {{ $metrics['memory_usage'] }}%"></div>
-                </div>
-            </div>
-            
-            <div>
-                <div class="flex justify-between mb-1">
-                    <span class="text-sm font-medium text-gray-700">Penggunaan Disk</span>
-                    <span class="text-sm font-medium text-gray-700">{{ $metrics['disk_usage'] }}%</span>
-                </div>
-                <div class="w-full bg-gray-200 rounded-full h-2">
-                    <div class="bg-primary-600 h-2 rounded-full" style="width: {{ $metrics['disk_usage'] }}%"></div>
-                </div>
-            </div>
-            
-            <div class="pt-4 border-t border-gray-200">
-                <div class="grid grid-cols-2 gap-4">
-                    <div>
-                        <p class="text-sm text-gray-500">Total Pengujian</p>
-                        <p class="text-2xl font-semibold text-gray-800">{{ $metrics['total_tests'] }}</p>
-                    </div>
-                    <div>
-                        <p class="text-sm text-gray-500">Cache Hit Rate</p>
-                        <p class="text-2xl font-semibold text-gray-800">{{ $metrics['cache_hit_rate'] }}%</p>
-                    </div>
-                    <div>
-                        <p class="text-sm text-gray-500">REST Wins</p>
-                        <p class="text-2xl font-semibold text-gray-800">{{ $metrics['rest_wins'] }}%</p>
-                    </div>
-                    <div>
-                        <p class="text-sm text-gray-500">GraphQL Wins</p>
-                        <p class="text-2xl font-semibold text-gray-800">{{ $metrics['graphql_wins'] }}%</p>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-    <div class="bg-white rounded-lg shadow-md p-6">
-        <h2 class="text-xl font-semibold mb-4 flex items-center">
-            <i class="fas fa-chart-bar text-primary-600 mr-2"></i>
-            Perbandingan Waktu Respons
-        </h2>
-        
-        <div class="h-64">
-            <canvas id="responseTimeChart"></canvas>
-        </div>
-    </div>
-    
-    <div class="bg-white rounded-lg shadow-md p-6">
-        <h2 class="text-xl font-semibold mb-4 flex items-center">
-            <i class="fas fa-chart-pie text-primary-600 mr-2"></i>
-            Distribusi API Pemenang
-        </h2>
-        
-        <div class="h-64">
-            <canvas id="winnerDistributionChart"></canvas>
-        </div>
-    </div>
 </div>
 
 <!-- API Comparison Section -->
@@ -600,46 +509,6 @@
         </div>
     </div>
 
-    <div class="mt-4 flex justify-center">
-        <a href="/logs" class="inline-flex items-center text-primary-600 hover:text-primary-800">
-            Lihat Semua Riwayat
-            <i class="fas fa-arrow-right ml-2"></i>
-        </a>
-    </div>
-</div>
-
-<div class="grid grid-cols-1 md:grid-cols-6 gap-4 mt-6">
-    <a href="/documentation" class="flex items-center justify-center p-4 bg-white rounded-lg shadow-sm hover:shadow-md transition-shadow duration-300 border border-gray-200">
-        <i class="fas fa-book text-primary-600 mr-2"></i>
-        <span>Dokumentasi</span>
-    </a>
-    
-    <a href="/docs/dashboard" class="flex items-center justify-center p-4 bg-white rounded-lg shadow-sm hover:shadow-md transition-shadow duration-300 border border-gray-200">
-        <i class="fas fa-tachometer-alt text-primary-600 mr-2"></i>
-        <span>Dashboard</span>
-    </a>
-    
-    <a href="/docs/repositories" class="flex items-center justify-center p-4 bg-white rounded-lg shadow-sm hover:shadow-md transition-shadow duration-300 border border-gray-200">
-        <i class="fas fa-code-branch text-primary-600 mr-2"></i>
-        <span>Repository</span>
-    </a>
-    
-    <a href="/docs/metrics" class="flex items-center justify-center p-4 bg-white rounded-lg shadow-sm hover:shadow-md transition-shadow duration-300 border border-gray-200">
-        <i class="fas fa-chart-line text-primary-600 mr-2"></i>
-        <span>Metrik</span>
-    </a>
-    
-    <a href="/docs/jmeter" class="flex items-center justify-center p-4 bg-white rounded-lg shadow-sm hover:shadow-md transition-shadow duration-300 border border-gray-200">
-        <i class="fas fa-hammer text-primary-600 mr-2"></i>
-        <span>JMeter</span>
-    </a>
-    
-    <a href="/docs/aws" class="flex items-center justify-center p-4 bg-white rounded-lg shadow-sm hover:shadow-md transition-shadow duration-300 border border-gray-200">
-        <i class="fas fa-server text-primary-600 mr-2"></i>
-        <span>AWS</span>
-    </a>
-</div>
-
 @endsection
 
 @section('scripts')
@@ -663,7 +532,6 @@
     };
     
     // Query details dari server
-    const queryDetails = {!! json_encode($queryDetails ?? []) !!};
     function updateQueryDescription() {
         const select = document.getElementById('query_id');
         const descDiv = document.getElementById('queryDescription');
@@ -677,189 +545,14 @@
             descDiv.classList.remove('hidden');
             customWrapper.classList.add('hidden');
         }
-        
-        // Update query details
-        updateQueryDetails(val);
-    }
-    
-    function updateQueryDetails(queryId) {
-        const restEndpointElement = document.getElementById('restEndpointUrl');
-        const graphqlQueryElement = document.getElementById('graphqlQuery');
-        
-        if (queryDetails[queryId]) {
-            const details = queryDetails[queryId];
-            
-            // Update REST endpoint
-            restEndpointElement.textContent = details.rest || 'Tidak tersedia';
-            
-            // Update GraphQL query
-            graphqlQueryElement.textContent = details.graphql || 'Tidak tersedia';
-        } else {
-            restEndpointElement.textContent = 'Pilih skenario query untuk melihat detail endpoint';
-            graphqlQueryElement.textContent = 'Pilih skenario query untuk melihat detail GraphQL query';
-        }
     }
 
-    // Mapping endpoint per repository
-    const repoEndpointsMap = {
-        'csurfer/gitsuggest': [
-            'GET /users/:user',
-            'GET /users/:user/starred',
-            'GET /users/:user/following',
-            'GET /users/:user/starred',
-            'GET /search/repositories'
-        ],
-        'donnemartin/gitsome': [
-            'GET /users/:user/followers',
-            'GET /users/:user/following',
-            'GET /repos/:owner/:repo/issues',
-            'GET /users/:user/repos',
-            'GET /repos/:owner/:repo/pulls',
-            'GET /users/:user/repos',
-            'GET /search/issues',
-            'GET /search/repositories',
-            'GET /users/:user/starred',
-            'GET /users/:user',
-            'GET /users/:user/repos'
-        ],
-        'guyzmo/git-repo': [
-            'GET /users/:user/repos',
-            'GET /users/:user/gists',
-            'GET /repos/:owner/:repo',
-            'GET /repos/:owner/:repo/pulls',
-            'GET /repos/:owner/:repo'
-        ],
-        'donnemartin/viz': [
-            'GET /users/:user',
-            'GET /search/repositories',
-            'GET /repos/:owner/:repo'
-        ],
-        'vdaubry/github-awards': [
-            'GET /users/:user',
-            'GET /users/:user/repos'
-        ],
-        'bibcure/arxivcheck': [
-            'GET /query/:search_query'
-        ],
-        'karpathy/arxiv-sanity-preserver': [
-            'GET /query/:search_query'
-        ]
-    };
-
-    function updateRepoEndpoints() {
-        const repoSelect = document.getElementById('repository');
-        const endpointsDiv = document.getElementById('repoEndpoints');
-        const endpointsList = document.getElementById('repoEndpointsList');
-        const val = repoSelect.value;
-        if (repoEndpointsMap[val]) {
-            endpointsList.innerHTML = repoEndpointsMap[val].map(e => `<li>${e}</li>`).join('');
-            endpointsDiv.classList.remove('hidden');
-        } else {
-            endpointsList.innerHTML = '';
-            endpointsDiv.classList.add('hidden');
-        }
-    }
     document.addEventListener('DOMContentLoaded', function() {
-        // Response Time Chart
-        const responseTimeCtx = document.getElementById('responseTimeChart').getContext('2d');
-        const responseTimeChart = new Chart(responseTimeCtx, {
-            type: 'bar',
-            data: {
-                labels: {!! json_encode($chart_data['labels']) !!},
-                datasets: [
-                    {
-                        label: 'REST API',
-                        data: {!! json_encode($chart_data['rest_times']) !!},
-                        backgroundColor: 'rgba(79, 70, 229, 0.6)',
-                        borderColor: 'rgba(79, 70, 229, 1)',
-                        borderWidth: 1
-                    },
-                    {
-                        label: 'GraphQL API',
-                        data: {!! json_encode($chart_data['graphql_times']) !!},
-                        backgroundColor: 'rgba(16, 185, 129, 0.6)',
-                        borderColor: 'rgba(16, 185, 129, 1)',
-                        borderWidth: 1
-                    }
-                ]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                indexAxis: 'y',
-                plugins: {
-                    title: {
-                        display: true,
-                        text: 'Rata-rata Waktu Respons per Query (ms)',
-                        font: {
-                            size: 14
-                        }
-                    },
-                    tooltip: {
-                        callbacks: {
-                            label: function(context) {
-                                return `${context.dataset.label}: ${context.raw.toFixed(2)} ms`;
-                            }
-                        }
-                    }
-                },
-                scales: {
-                    x: {
-                        beginAtZero: true,
-                        title: {
-                            display: true,
-                            text: 'Waktu Respons (ms)'
-                        }
-                    },
-                    y: {
-                        title: {
-                            display: true,
-                            text: 'Query ID'
-                        }
-                    }
-                }
-            }
-        });
-        
-        // Winner Distribution Chart
-        const winnerDistributionCtx = document.getElementById('winnerDistributionChart').getContext('2d');
-        const winnerDistributionChart = new Chart(winnerDistributionCtx, {
-            type: 'pie',
-            data: {
-                labels: ['REST API', 'GraphQL API'],
-                datasets: [{
-                    data: [{{ $metrics['rest_wins'] }}, {{ $metrics['graphql_wins'] }}],
-                    backgroundColor: [
-                        'rgba(79, 70, 229, 0.6)',
-                        'rgba(16, 185, 129, 0.6)'
-                    ],
-                    borderColor: [
-                        'rgba(79, 70, 229, 1)',
-                        'rgba(16, 185, 129, 1)'
-                    ],
-                    borderWidth: 1
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        position: 'bottom'
-                    }
-                }
-            }
-        });
-
         // Set initial description
         updateQueryDescription();
         // Update description on change
         document.getElementById('query_id').addEventListener('change', updateQueryDescription);
 
-        // Set initial endpoints
-        updateRepoEndpoints();
-        // Update endpoints on change
-        document.getElementById('repository').addEventListener('change', updateRepoEndpoints);
     });
 
 function showResultModal(result) {
