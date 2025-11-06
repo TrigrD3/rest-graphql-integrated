@@ -375,6 +375,9 @@
                         ? $batch['created_at']
                         : \Illuminate\Support\Carbon::parse($batch['created_at']);
                     $createdAtLabel = $createdAt?->timezone(config('app.timezone'))->toDayDateTimeString() ?? '-';
+                    $batchId = $batch['batch_id'] ?? null;
+                    $logIds = $batch['log_ids'] ?? [];
+                    $displayLabel = $batch['display_batch_id'] ?? ($batchId ?: 'Batch');
                 @endphp
                 <tr>
                     <td class="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-700">
@@ -389,10 +392,20 @@
                     <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{!! $renderSummaryCell($summaries['graphql'], 'graphql') !!}</td>
                     <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{!! $renderSummaryCell($summaries['integrated'], 'integrated') !!}</td>
                     <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        <button onclick="showBatchDetails({{ json_encode($batch['batch_id'] ?? null) }}, {{ json_encode($batch['query_id']) }}, {{ json_encode($batch['created_date'] ?? null) }})"
+                        <div class="flex items-center gap-3">
+                            <button
+                                type="button"
+                                onclick="showBatchDetails({{ json_encode($batch['batch_id'] ?? null) }}, {{ json_encode($batch['query_id']) }}, {{ json_encode($batch['created_date'] ?? null) }})"
                                 class="text-primary-600 hover:text-primary-800 font-medium">
-                            <i class="fas fa-eye mr-1"></i>Detail
-                        </button>
+                                <i class="fas fa-eye mr-1"></i>Detail
+                            </button>
+                            <button
+                                type="button"
+                                onclick="confirmDeleteBatch({{ json_encode($batchId) }}, {{ json_encode($logIds) }}, {{ json_encode($displayLabel) }})"
+                                class="text-red-600 hover:text-red-800 font-medium">
+                                <i class="fas fa-trash mr-1"></i>Hapus
+                            </button>
+                        </div>
                     </td>
                 </tr>
                 @empty
@@ -462,6 +475,34 @@
         <div class="mt-6 flex justify-end">
             <button onclick="closeTestDetailsModal()" class="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300">
                 Tutup
+            </button>
+        </div>
+    </div>
+</div>
+
+<div id="deleteBatchModal" class="fixed inset-0 bg-gray-700 bg-opacity-50 hidden overflow-y-auto h-full w-full" style="z-index: 1000;">
+    <div class="relative top-20 mx-auto w-11/12 md:w-1/2 lg:w-1/3 bg-white rounded-lg shadow-xl border">
+        <div class="flex items-center justify-between px-6 py-4 border-b">
+            <h3 class="text-lg font-semibold text-gray-900">Konfirmasi Penghapusan</h3>
+            <button type="button" onclick="closeDeleteBatchModal()" class="text-gray-400 hover:text-gray-600">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div class="px-6 py-5 space-y-4">
+            <p class="text-gray-700 text-sm leading-relaxed">
+                Apakah Anda yakin ingin menghapus riwayat pengujian untuk batch
+                <span id="deleteBatchLabel" class="font-semibold text-gray-900"></span>?
+            </p>
+            <p class="text-xs text-gray-500">
+                Tindakan ini tidak dapat dibatalkan dan semua data terkait batch tersebut akan dihapus.
+            </p>
+        </div>
+        <div class="px-6 py-4 border-t flex justify-end gap-3">
+            <button type="button" onclick="closeDeleteBatchModal()" class="px-4 py-2 rounded-md border border-gray-300 text-gray-700 hover:bg-gray-100">
+                Batal
+            </button>
+            <button type="button" id="confirmDeleteBatchButton" onclick="performBatchDeletion()" class="px-4 py-2 rounded-md bg-red-600 text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2">
+                Hapus
             </button>
         </div>
     </div>
@@ -1281,6 +1322,110 @@ async function showBatchDetails(batchId, queryId, testDate = null, apiType = 'al
 // Function to close test details modal
 function closeTestDetailsModal() {
     document.getElementById('testDetailsModal').classList.add('hidden');
+}
+
+let pendingDeleteBatch = { batchId: null, logIds: [], label: null };
+let deleteRequestInFlight = false;
+
+function confirmDeleteBatch(batchId, logIds, label) {
+    const modal = document.getElementById('deleteBatchModal');
+    const labelEl = document.getElementById('deleteBatchLabel');
+
+    pendingDeleteBatch = {
+        batchId: batchId || null,
+        logIds: Array.isArray(logIds) ? logIds : [],
+        label: label || batchId || 'Batch'
+    };
+
+    if (labelEl) {
+        labelEl.textContent = pendingDeleteBatch.label;
+    }
+
+    if (modal) {
+        modal.classList.remove('hidden');
+    }
+}
+
+function closeDeleteBatchModal(force = false) {
+    if (!force && deleteRequestInFlight) {
+        return;
+    }
+
+    const modal = document.getElementById('deleteBatchModal');
+    if (modal) {
+        modal.classList.add('hidden');
+    }
+
+    pendingDeleteBatch = { batchId: null, logIds: [], label: null };
+}
+
+async function performBatchDeletion() {
+    if (deleteRequestInFlight) {
+        return;
+    }
+
+    const modal = document.getElementById('deleteBatchModal');
+    const button = document.getElementById('confirmDeleteBatchButton');
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
+
+    if (!modal || !button || !csrfToken) {
+        showNotification('Konfigurasi penghapusan tidak lengkap', 'error');
+        return;
+    }
+
+    if (!pendingDeleteBatch.batchId && (!pendingDeleteBatch.logIds || pendingDeleteBatch.logIds.length === 0)) {
+        showNotification('Batch tidak valid untuk dihapus', 'error');
+        return;
+    }
+
+    deleteRequestInFlight = true;
+    let shouldReloadAfterDelete = false;
+    const originalLabel = button.innerHTML;
+
+    button.disabled = true;
+    button.innerHTML = '<span class="flex items-center gap-2"><svg class="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>Menghapus...</span>';
+
+    try {
+        const payload = {};
+        if (pendingDeleteBatch.batchId) {
+            payload.batch_id = pendingDeleteBatch.batchId;
+        } else {
+            payload.log_ids = pendingDeleteBatch.logIds;
+        }
+
+        const response = await fetch('/test-batches', {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': csrfToken,
+                'Accept': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+            throw new Error(data.error || 'Gagal menghapus riwayat pengujian');
+        }
+
+        shouldReloadAfterDelete = true;
+        showNotification('Riwayat pengujian berhasil dihapus', 'success');
+    } catch (error) {
+        console.error('Error deleting batch:', error);
+        showNotification(error.message || 'Terjadi kesalahan saat menghapus riwayat pengujian', 'error');
+    } finally {
+        deleteRequestInFlight = false;
+        button.disabled = false;
+        button.innerHTML = originalLabel;
+
+        if (shouldReloadAfterDelete) {
+            closeDeleteBatchModal(true);
+            setTimeout(() => {
+                window.location.reload();
+            }, 600);
+        }
+    }
 }
 
 </script>

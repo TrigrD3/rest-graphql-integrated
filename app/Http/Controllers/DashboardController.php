@@ -229,6 +229,7 @@ class DashboardController extends Controller
                     'query_id' => $firstLog->query_id,
                     'created_at' => $lastLog?->created_at ?? $firstLog->created_at,
                     'created_date' => ($lastLog?->created_at ?? $firstLog->created_at)?->toDateString(),
+                    'log_ids' => $logs->pluck('id')->all(),
                     'summaries' => [
                         'rest' => $summarize($categorized['rest'], 'rest'),
                         'graphql' => $summarize($categorized['graphql'], 'graphql'),
@@ -1109,6 +1110,58 @@ class DashboardController extends Controller
         } catch (\Exception $e) {
             Log::error('Exception in getTestDetails: ' . $e->getMessage());
             
+            return response()->json([
+                'success' => false,
+                'error' => 'Terjadi kesalahan: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function deleteBatch(Request $request)
+    {
+        try {
+            $validated = $request->validate([
+                'batch_id' => 'nullable|string',
+                'log_ids' => 'nullable|array',
+                'log_ids.*' => 'integer'
+            ]);
+
+            $batchId = $validated['batch_id'] ?? null;
+            $logIds = collect($validated['log_ids'] ?? [])->unique()->values()->all();
+
+            if (!$batchId && empty($logIds)) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Batch ID atau log IDs diperlukan'
+                ], 422);
+            }
+
+            $deletedRows = 0;
+            if ($batchId) {
+                $deletedRows = RequestLog::where('batch_id', $batchId)->delete();
+            } else {
+                $deletedRows = RequestLog::whereIn('id', $logIds)->delete();
+            }
+
+            if ($deletedRows === 0) {
+                return response()->json([
+                    'success' => false,
+                    'error' => 'Data batch tidak ditemukan'
+                ], 404);
+            }
+
+            Cache::forget('dashboard_metrics');
+            Cache::forget('dashboard_chart_data');
+
+            return response()->json([
+                'success' => true,
+                'deleted' => $deletedRows
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Exception in deleteBatch: ' . $e->getMessage(), [
+                'trace' => $e->getTraceAsString()
+            ]);
+
             return response()->json([
                 'success' => false,
                 'error' => 'Terjadi kesalahan: ' . $e->getMessage()

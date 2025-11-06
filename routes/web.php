@@ -80,3 +80,4 @@ Route::get('/reports/summary', [ReportController::class, 'summary'])->name('repo
 Route::get('/api-endpoints', [DashboardController::class, 'showApiEndpoints']);
 
 Route::get('/test-details', [DashboardController::class, 'getTestDetails']);
+Route::delete('/test-batches', [DashboardController::class, 'deleteBatch'])->name('test-batches.destroy');
