@@ -207,15 +207,7 @@
                     <i class="fas fa-chart-line mr-2"></i>
                     Uji Performa Skenario API
                 </h4>
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div>
-                        <label for="api_type" class="block text-sm font-medium text-gray-700 mb-1">Tipe API:</label>
-                        <select id="api_type" name="api_type" class="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50">
-                            <option value="rest">REST API</option>
-                            <option value="graphql">GraphQL API</option>
-                            <option value="integrated">Integrated API (Cerdas)</option>
-                        </select>
-                    </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                         <label for="request_count" class="block text-sm font-medium text-gray-700 mb-1">Jumlah Request:</label>
                         <input type="number" id="request_count" name="request_count" min="1" max="1000" value="10" class="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50">
@@ -231,6 +223,9 @@
                         </button>
                     </div>
                 </div>
+                <p class="mt-3 text-xs text-blue-700 bg-blue-100 border border-blue-200 rounded p-3">
+                    Pengujian ini akan menjalankan REST, GraphQL, dan Integrated API secara berurutan agar metrik CPU, memori, dan waktu tetap akurat.
+                </p>
             </div>
             
             <!-- Section untuk menampilkan detail Query -->
@@ -239,280 +234,244 @@
     
 </div>
 
-<!-- API Comparison Section -->
 <div class="bg-white rounded-lg shadow-md p-6 mb-6">
-    <h2 class="text-xl font-semibold mb-4 flex items-center">
-        <i class="fas fa-chart-bar text-primary-600 mr-2"></i>
-        Perbandingan API
-        <span id="dataSourceIndicator" class="ml-2 text-sm font-normal text-gray-500"></span>
-    </h2>
-    
-    <div class="mb-4">
-        <label for="comparison_query" class="block text-sm font-medium text-gray-700 mb-2">Pilih Query untuk Perbandingan:</label>
-        <div class="flex items-center gap-3">
-            <select id="comparison_query" class="w-full md:w-1/3 rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring focus:ring-primary-500 focus:ring-opacity-50 {{ empty($availableComparisonQueries) ? 'bg-gray-100 cursor-not-allowed' : '' }}" {{ empty($availableComparisonQueries) ? 'disabled' : '' }}>
-                @forelse($availableComparisonQueries as $queryId => $description)
-                    <option value="{{ $queryId }}">{{ $queryId }}: {{ $description }}</option>
-                @empty
-                    <option value="">Belum ada data pengujian</option>
-                @endforelse
+    <div class="flex flex-col md:flex-row md:items-center md:justify-between mb-4 gap-4">
+        <h2 class="text-xl font-semibold text-gray-800 flex items-center">
+            <i class="fas fa-chart-bar text-primary-600 mr-2"></i>
+            Ringkasan Performa API
+        </h2>
+        <div class="flex items-center gap-2">
+            <select data-chart-filter class="rounded-md border-gray-300 text-sm shadow-sm focus:border-primary-500 focus:ring focus:ring-primary-500 focus:ring-opacity-50">
+                <option value="">Semua Query</option>
+                @foreach($chartQueryOptions as $optionQueryId)
+                    <option value="{{ $optionQueryId }}" {{ ($chartQueryId ?? null) === $optionQueryId ? 'selected' : '' }}>
+                        {{ $optionQueryId }}
+                    </option>
+                @endforeach
             </select>
-            <button id="updateComparisonBtn" class="px-4 py-2 text-white rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 {{ empty($availableComparisonQueries) ? 'bg-gray-400 cursor-not-allowed' : 'bg-primary-600 hover:bg-primary-700 focus:ring-primary-500' }}" {{ empty($availableComparisonQueries) ? 'disabled' : '' }}>
-                <i class="fas fa-sync mr-1"></i>
-                Tampilkan Perbandingan
+            <button type="button" data-chart-filter-button class="px-3 py-2 text-sm bg-primary-600 text-white rounded-md hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2">
+                Terapkan
             </button>
         </div>
-        @if(empty($availableComparisonQueries))
-        <p class="mt-2 text-sm text-amber-600">
-            <i class="fas fa-info-circle mr-1"></i>
-            Silakan jalankan pengujian terlebih dahulu untuk melihat perbandingan.
-        </p>
-        @endif
     </div>
-    
-    <div class="bg-gray-50 rounded-lg p-6">
-        <h3 class="text-lg font-semibold mb-4 text-center">Perbandingan Metrik API (REST vs GraphQL vs Integrated)</h3>
-        <div class="h-96">
-            <canvas id="apiComparisonChart"></canvas>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div>
+            <div class="flex items-center mb-3">
+                <i class="fas fa-tachometer-alt text-blue-500 mr-2"></i>
+                <h3 class="text-md font-semibold text-gray-800">Response Time (ms)</h3>
+            </div>
+            <div class="h-64">
+                <canvas id="chartResponseTime"></canvas>
+            </div>
         </div>
-    </div>
-    
-    <!-- Data Info Section -->
-    <div id="dataInfo" class="mt-4 p-4 bg-blue-50 rounded-lg hidden">
-        <div class="flex items-center">
-            <i class="fas fa-info-circle text-blue-600 mr-2"></i>
-            <span class="text-sm text-blue-800">
-                <strong>Data Source:</strong> <span id="dataSourceText">-</span> | 
-                <strong>Query:</strong> <span id="currentQuery">-</span> | 
-                <strong>Last Updated:</strong> <span id="lastUpdated">-</span>
-            </span>
+
+        <div>
+            <div class="flex items-center mb-3">
+                <i class="fas fa-microchip text-green-500 mr-2"></i>
+                <h3 class="text-md font-semibold text-gray-800">CPU Usage (%)</h3>
+            </div>
+            <div class="h-64">
+                <canvas id="chartCpuUsage"></canvas>
+            </div>
+        </div>
+
+        <div>
+            <div class="flex items-center mb-3">
+                <i class="fas fa-memory text-purple-500 mr-2"></i>
+                <h3 class="text-md font-semibold text-gray-800">Memory Usage (%)</h3>
+            </div>
+            <div class="h-64">
+                <canvas id="chartMemoryUsage"></canvas>
+            </div>
         </div>
     </div>
 </div>
 
-<div class="bg-white rounded-lg shadow-md p-6">
+<div class="bg-white rounded-lg shadow-md p-6 mb-6">
     <h2 class="text-xl font-semibold mb-4 flex items-center">
         <i class="fas fa-history text-primary-600 mr-2"></i>
         Riwayat Pengujian Terbaru
     </h2>
 
-    <!-- Tabs Navigation -->
-    <div class="mb-4">
-        <div class="border-b border-gray-200">
-            <nav class="-mb-px flex space-x-8" aria-label="Tabs">
-                <button id="tab-rest" class="tab-button whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm border-primary-500 text-primary-600" data-tab="rest">
-                    REST API
-                </button>
-                <button id="tab-graphql" class="tab-button whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300" data-tab="graphql">
-                    GraphQL API
-                </button>
-                <button id="tab-integrated" class="tab-button whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300" data-tab="integrated">
-                    Integrated API
-                </button>
-                <button id="tab-all" class="tab-button whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300" data-tab="all">
-                    Semua
-                </button>
-            </nav>
+    @php
+        $cacheBadgeClasses = [
+            'HIT' => 'bg-purple-100 text-purple-800',
+            'CACHE_USED' => 'bg-purple-100 text-purple-800',
+            'MISS' => 'bg-gray-100 text-gray-800',
+            '-' => 'bg-gray-100 text-gray-500',
+        ];
+        $defaultCacheBadgeClass = 'bg-gray-100 text-gray-600';
+        $winnerBadgeClasses = [
+            'rest' => 'bg-blue-100 text-blue-800',
+            'graphql' => 'bg-green-100 text-green-800',
+            'integrated' => 'bg-purple-100 text-purple-800',
+        ];
+        $defaultWinnerBadgeClass = 'bg-gray-100 text-gray-700';
+        $renderSummaryCell = function ($summary, $apiType = null) use ($cacheBadgeClasses, $defaultCacheBadgeClass, $winnerBadgeClasses, $defaultWinnerBadgeClass) {
+            if (!$summary) {
+                return '<span class="text-xs text-gray-400">-</span>';
+            }
+
+            $avgResponse = $summary['avg_response_time_ms'] ?? null;
+            $avgCpu = $summary['avg_cpu_usage'] ?? null;
+            $avgMemory = $summary['avg_memory_usage'] ?? null;
+            $count = $summary['count'] ?? 0;
+
+            $responseText = !is_null($avgResponse) ? number_format($avgResponse, 2) . ' ms' : '-';
+            $cpuText = !is_null($avgCpu) ? number_format($avgCpu, 2) . '%' : '-';
+            $memoryText = !is_null($avgMemory) ? number_format($avgMemory, 2) . '%' : '-';
+
+            $cacheStatus = strtoupper($summary['cache_status'] ?? '-');
+            $cacheClass = $cacheBadgeClasses[$cacheStatus] ?? $defaultCacheBadgeClass;
+
+            $winner = $summary['winner_api'] ?? '-';
+            $winnerKey = strtolower((string) $winner);
+            $winnerClass = $winnerBadgeClasses[$winnerKey] ?? $defaultWinnerBadgeClass;
+            $winnerLabel = strtoupper($winner ?: '-');
+
+            $selected = $summary['selected_api'] ?? null;
+            $selectedLabel = $selected ? 'Selected: ' . strtoupper($selected) : null;
+
+            $countLabel = $count > 0 ? $count . 'x' : '0x';
+
+            $html = '<div class="flex flex-col gap-1">';
+            $html .= '<span class="text-sm font-semibold text-gray-900">' . $responseText . '</span>';
+            $html .= '<div class="text-xs text-gray-500">CPU ' . $cpuText . ' | Mem ' . $memoryText . '</div>';
+            $html .= '<div class="flex flex-wrap items-center gap-2 text-xs">';
+            if ($apiType === 'integrated') {
+                $html .= '<span class="px-2 inline-flex font-semibold rounded-full ' . $cacheClass . '">' . $cacheStatus . '</span>';
+            }
+            $html .= '<span class="px-2 inline-flex font-semibold rounded-full ' . $winnerClass . '">' . $winnerLabel . '</span>';
+            $html .= '<span class="px-2 inline-flex font-semibold rounded-full bg-gray-100 text-gray-700">' . $countLabel . '</span>';
+            $html .= '</div>';
+            if ($apiType === 'integrated' && $selectedLabel) {
+                $html .= '<div class="text-xs text-gray-500">' . $selectedLabel . '</div>';
+            }
+            $html .= '</div>';
+
+            return $html;
+        };
+    @endphp
+
+    <div class="overflow-x-auto">
+        <table class="min-w-full divide-y divide-gray-200">
+            <thead class="bg-gray-50">
+                <tr>
+                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Batch ID</th>
+                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Query</th>
+                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Waktu</th>
+                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">REST</th>
+                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">GraphQL</th>
+                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Integrated</th>
+                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Aksi</th>
+                </tr>
+            </thead>
+            <tbody class="bg-white divide-y divide-gray-200">
+                @forelse($recent_batches as $batch)
+                @php
+                    $summaries = $batch['summaries'];
+                    $createdAt = $batch['created_at'] instanceof \Illuminate\Support\Carbon
+                        ? $batch['created_at']
+                        : \Illuminate\Support\Carbon::parse($batch['created_at']);
+                    $createdAtLabel = $createdAt?->timezone(config('app.timezone'))->toDayDateTimeString() ?? '-';
+                @endphp
+                <tr>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-700">
+                        {{ $batch['display_batch_id'] ?? $batch['batch_id'] ?? '-' }}
+                        @if(!empty($batch['is_legacy']))
+                            <span class="ml-2 px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-200 text-gray-700">Legacy</span>
+                        @endif
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{{ $batch['query_id'] }}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ $createdAtLabel }}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{!! $renderSummaryCell($summaries['rest'], 'rest') !!}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{!! $renderSummaryCell($summaries['graphql'], 'graphql') !!}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{!! $renderSummaryCell($summaries['integrated'], 'integrated') !!}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        <button onclick="showBatchDetails({{ json_encode($batch['batch_id'] ?? null) }}, {{ json_encode($batch['query_id']) }}, {{ json_encode($batch['created_date'] ?? null) }})"
+                                class="text-primary-600 hover:text-primary-800 font-medium">
+                            <i class="fas fa-eye mr-1"></i>Detail
+                        </button>
+                    </td>
+                </tr>
+                @empty
+                <tr>
+                    <td colspan="7" class="px-6 py-4 text-center text-sm text-gray-500">
+                        Belum ada data pengujian
+                    </td>
+                </tr>
+                @endforelse
+            </tbody>
+        </table>
+    </div>
+    <div class="mt-4">
+        {{ $recent_batches->appends(request()->except('history_page'))->links() }}
+    </div>
+</div>
+
+
+
+<div id="testDetailsModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden overflow-y-auto h-full w-full" style="z-index: 999;">
+    <div class="relative top-10 mx-auto p-5 border w-11/12 md:w-4/5 lg:w-3/4 shadow-lg rounded-md bg-white">
+        <div class="flex justify-between items-center border-b pb-3">
+            <h3 class="text-xl font-semibold text-gray-900" id="testDetailsTitle">Detail Pengujian</h3>
+            <button onclick="closeTestDetailsModal()" class="text-gray-400 hover:text-gray-500">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        
+        <div class="mt-4">
+            <!-- Statistik Pengujian -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                <div class="bg-blue-50 p-4 rounded-lg">
+                    <h4 class="font-semibold text-blue-800 mb-2">Total Pengujian</h4>
+                    <p class="text-2xl font-bold text-blue-900" id="totalTests">-</p>
+                </div>
+                <div class="bg-green-50 p-4 rounded-lg">
+                    <h4 class="font-semibold text-green-800 mb-2">Success Rate</h4>
+                    <p class="text-2xl font-bold text-green-900" id="successRate">-</p>
+                </div>
+                <div class="bg-purple-50 p-4 rounded-lg">
+                    <h4 class="font-semibold text-purple-800 mb-2">Cache Hits</h4>
+                    <p class="text-2xl font-bold text-purple-900" id="cacheHits">-</p>
+                </div>
+            </div>
+            
+            <!-- Detail Tabel -->
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Waktu</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">REST (ms)</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">GraphQL (ms)</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">CPU (%)</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Memory (%)</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Cache</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Pemenang</th>
+                        </tr>
+                    </thead>
+                    <tbody id="testDetailsTable" class="bg-white divide-y divide-gray-200">
+                        <!-- Data akan diisi oleh JavaScript -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        
+        <div class="mt-6 flex justify-end">
+            <button onclick="closeTestDetailsModal()" class="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300">
+                Tutup
+            </button>
         </div>
     </div>
-
-    <!-- Tab Content -->
-    <div id="tab-content-rest" class="tab-content">
-        <div class="overflow-x-auto">
-            <table class="min-w-full divide-y divide-gray-200">
-                <thead class="bg-gray-50">
-                    <tr>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Query</th>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Cache</th>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Response Time (ms)</th>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tests</th>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Waktu</th>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Aksi</th>
-                    </tr>
-                </thead>
-                <tbody class="bg-white divide-y divide-gray-200">
-                    @forelse($recent_rest_tests as $test)
-                    <tr>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{{ $test->query_id }}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ $test->cache_status }}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ number_format($test->avg_rest_time, 2) }}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                            <span class="px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
-                                {{ $test->test_count }} tests
-                            </span>
-                        </td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ \Carbon\Carbon::parse($test->latest_test_time)->diffForHumans() }}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                            <button onclick="showTestDetails('{{ $test->query_id }}', '{{ \Carbon\Carbon::parse($test->latest_test_time)->format('Y-m-d') }}', 'rest')"
-                                    class="text-primary-600 hover:text-primary-800 font-medium">
-                                <i class="fas fa-eye mr-1"></i>Detail
-                            </button>
-                        </td>
-                    </tr>
-                    @empty
-                    <tr>
-                        <td colspan="6" class="px-6 py-4 text-center text-sm text-gray-500">
-                            Belum ada data pengujian REST API
-                        </td>
-                    </tr>
-                    @endforelse
-                </tbody>
-            </table>
-        </div>
-    </div>
-
-    <div id="tab-content-graphql" class="tab-content hidden">
-        <div class="overflow-x-auto">
-            <table class="min-w-full divide-y divide-gray-200">
-                <thead class="bg-gray-50">
-                    <tr>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Query</th>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Cache</th>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Response Time (ms)</th>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tests</th>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Waktu</th>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Aksi</th>
-                    </tr>
-                </thead>
-                <tbody class="bg-white divide-y divide-gray-200">
-                    @forelse($recent_graphql_tests as $test)
-                    <tr>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{{ $test->query_id }}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ $test->cache_status }}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ number_format($test->avg_graphql_time, 2) }}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                            <span class="px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
-                                {{ $test->test_count }} tests
-                            </span>
-                        </td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ \Carbon\Carbon::parse($test->latest_test_time)->diffForHumans() }}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                            <button onclick="showTestDetails('{{ $test->query_id }}', '{{ \Carbon\Carbon::parse($test->latest_test_time)->format('Y-m-d') }}', 'graphql')"
-                                    class="text-primary-600 hover:text-primary-800 font-medium">
-                                <i class="fas fa-eye mr-1"></i>Detail
-                            </button>
-                        </td>
-                    </tr>
-                    @empty
-                    <tr>
-                        <td colspan="6" class="px-6 py-4 text-center text-sm text-gray-500">
-                            Belum ada data pengujian GraphQL API
-                        </td>
-                    </tr>
-                    @endforelse
-                </tbody>
-            </table>
-        </div>
-    </div>
-
-    <div id="tab-content-integrated" class="tab-content hidden">
-        <div class="overflow-x-auto">
-            <table class="min-w-full divide-y divide-gray-200">
-                <thead class="bg-gray-50">
-                    <tr>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Query</th>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Cache</th>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">REST (ms)</th>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">GraphQL (ms)</th>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Pemenang</th>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tests</th>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Waktu</th>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Aksi</th>
-                    </tr>
-                </thead>
-                <tbody class="bg-white divide-y divide-gray-200">
-                    @forelse($recent_integrated_tests as $test)
-                    <tr>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{{ $test->query_id }}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ $test->cache_status }}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ number_format($test->avg_rest_time, 2) }}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ number_format($test->avg_graphql_time, 2) }}</td>
-                        <td class="px-6 py-4 whitespace-nowrap">
-                            <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full {{ $test->latest_winner == 'rest' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800' }}">
-                                {{ ucfirst($test->latest_winner) }}
-                            </span>
-                        </td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                            <span class="px-2 py-1 text-xs font-semibold rounded-full bg-purple-100 text-purple-800">
-                                {{ $test->test_count }} tests
-                            </span>
-                        </td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ \Carbon\Carbon::parse($test->latest_test_time)->diffForHumans() }}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                            <button onclick="showTestDetails('{{ $test->query_id }}', '{{ \Carbon\Carbon::parse($test->latest_test_time)->format('Y-m-d') }}', 'integrated')"
-                                    class="text-primary-600 hover:text-primary-800 font-medium">
-                                <i class="fas fa-eye mr-1"></i>Detail
-                            </button>
-                        </td>
-                    </tr>
-                    @empty
-                    <tr>
-                        <td colspan="8" class="px-6 py-4 text-center text-sm text-gray-500">
-                            Belum ada data pengujian Integrated API
-                        </td>
-                    </tr>
-                    @endforelse
-                </tbody>
-            </table>
-        </div>
-    </div>
-
-    <div id="tab-content-all" class="tab-content hidden">
-        <div class="overflow-x-auto">
-            <table class="min-w-full divide-y divide-gray-200">
-                <thead class="bg-gray-50">
-                    <tr>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Query</th>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Cache</th>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">REST Avg (ms)</th>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">GraphQL Avg (ms)</th>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tests</th>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Pemenang</th>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Waktu</th>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Aksi</th>
-                    </tr>
-                </thead>
-                <tbody class="bg-white divide-y divide-gray-200">
-                    @forelse($recent_tests as $test)
-                    <tr>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{{ $test->query_id }}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ $test->cache_status }}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ number_format($test->avg_rest_time, 2) }}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ number_format($test->avg_graphql_time, 2) }}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                            <span class="px-2 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-800">
-                                {{ $test->test_count }} tests
-                            </span>
-                        </td>
-                        <td class="px-6 py-4 whitespace-nowrap">
-                            <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full {{ $test->latest_winner == 'rest' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800' }}">
-                                {{ ucfirst($test->latest_winner) }}
-                            </span>
-                        </td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ \Carbon\Carbon::parse($test->latest_test_time)->diffForHumans() }}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                            <button onclick="showTestDetails('{{ $test->query_id }}', '{{ \Carbon\Carbon::parse($test->latest_test_time)->format('Y-m-d') }}')"
-                                    class="text-primary-600 hover:text-primary-800 font-medium">
-                                <i class="fas fa-eye mr-1"></i>Detail
-                            </button>
-                        </td>
-                    </tr>
-                    @empty
-                    <tr>
-                        <td colspan="8" class="px-6 py-4 text-center text-sm text-gray-500">
-                            Belum ada data pengujian
-                        </td>
-                    </tr>
-                    @endforelse
-                </tbody>
-            </table>
-        </div>
-    </div>
-
+</div>
 @endsection
 
 @section('scripts')
 <script>
+const performanceChartData = @json($performanceCharts);
+
     // Query descriptions mapping
     const queryDescriptions = {
         Q1: 'Mengambil nama dari 100 project teratas berdasarkan jumlah stars.',
@@ -553,6 +512,7 @@
         // Update description on change
         document.getElementById('query_id').addEventListener('change', updateQueryDescription);
 
+        initializePerformanceCharts(performanceChartData);
     });
 
 function showResultModal(result) {
@@ -749,9 +709,14 @@ document.querySelector('form').addEventListener('submit', async function(e) {
 // Performance Test Button Handler
 document.getElementById('runPerformanceTestBtn').addEventListener('click', async function() {
     const queryId = document.getElementById('query_id').value;
-    const apiType = document.getElementById('api_type').value;
-    const requestCount = document.getElementById('request_count').value;
-    const cacheEnabled = apiType === 'integrated';
+    const requestCount = parseInt(document.getElementById('request_count').value, 10);
+    const batchId = `batch-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const scenarios = [
+        { api_type: 'rest', label: 'REST API', cache: false },
+        { api_type: 'graphql', label: 'GraphQL API', cache: false },
+        { api_type: 'integrated', label: 'Integrated API', cache: true }
+    ];
+    const results = [];
     
     // Disable button and show loading state
     const performanceTestBtn = document.getElementById('runPerformanceTestBtn');
@@ -764,29 +729,53 @@ document.getElementById('runPerformanceTestBtn').addEventListener('click', async
     performanceLoadingIcon.classList.remove('hidden');
     
     try {
-        const response = await fetch('/run-performance-test', {
-            method: 'POST',
-            body: JSON.stringify({
-                query_id: queryId,
-                api_type: apiType,
-                request_count: parseInt(requestCount),
-                cache: cacheEnabled
-            }),
-            headers: {
-                'Content-Type': 'application/json',
-                'Accept': 'application/json',
-                'X-Requested-With': 'XMLHttpRequest',
-                'X-CSRF-TOKEN': '{{ csrf_token() }}'
+        for (const scenario of scenarios) {
+            let scenarioResult;
+            try {
+                const response = await fetch('/run-performance-test', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        query_id: queryId,
+                        api_type: scenario.api_type,
+                        request_count: requestCount,
+                        cache: scenario.cache,
+                        batch_id: batchId
+                    }),
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'X-CSRF-TOKEN': '{{ csrf_token() }}'
+                    }
+                });
+                scenarioResult = await response.json();
+            } catch (err) {
+                scenarioResult = {
+                    success: false,
+                    error: err.message || 'Terjadi kesalahan jaringan'
+                };
             }
-        });
-        
-        const result = await response.json();
-        
-        if (result.success) {
-            showPerformanceResultModal(result.data);
-        } else {
-            alert('Error: ' + (result.error || 'Terjadi kesalahan'));
+
+            results.push({
+                api_type: scenario.api_type,
+                label: scenario.label,
+                cache: scenario.cache,
+                success: scenarioResult.success === true,
+                data: scenarioResult.success === true ? scenarioResult.data : null,
+                error: scenarioResult.success === true ? null : (scenarioResult.error || 'Terjadi kesalahan saat menjalankan pengujian')
+            });
+
+            if (!scenarioResult.success) {
+                break;
+            }
         }
+
+        showPerformanceResultsSummary({
+            query_id: queryId,
+            request_count: requestCount,
+            batch_id: batchId,
+            results
+        });
     } catch (error) {
         console.error('Error:', error);
         alert('Terjadi kesalahan saat menjalankan uji performa');
@@ -800,293 +789,102 @@ document.getElementById('runPerformanceTestBtn').addEventListener('click', async
 });
 
 // Function to show performance test result
-function showPerformanceResultModal(data) {
+// Function to show performance test result summary
+function showPerformanceResultsSummary(payload) {
+    const { query_id, request_count, batch_id, results } = payload;
     const modal = document.createElement('div');
     modal.className = 'fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full';
     modal.style.zIndex = '1000';
-    
-    // Calculate throughput and response time stats
-    const totalTime = data.details?.total_time || 0;
-    const responseTimes = data.details?.response_times || [];
-    const minResponse = responseTimes.length > 0 ? Math.min(...responseTimes) : 0;
-    const maxResponse = responseTimes.length > 0 ? Math.max(...responseTimes) : 0;
-    const throughput = totalTime > 0 ? (data.request_count / (totalTime / 1000)) : 0;
-    
+
+    const renderValue = (value, suffix = '', fallback = '-') => {
+        if (value === null || value === undefined || Number.isNaN(value)) {
+            return fallback;
+        }
+        if (typeof value === 'number') {
+            return `${value.toFixed(2)}${suffix}`;
+        }
+        return `${value}${suffix}`;
+    };
+
+    const cardsHtml = results.map(result => {
+        if (!result.success || !result.data) {
+            return `
+                <div class="bg-red-50 border border-red-200 rounded-lg p-4">
+                    <h4 class="font-semibold text-red-700 mb-2 flex items-center">
+                        <i class="fas fa-exclamation-triangle mr-2"></i>${result.label}
+                    </h4>
+                    <p class="text-sm text-red-600">${result.error || 'Terjadi kesalahan saat menjalankan pengujian.'}</p>
+                </div>
+            `;
+        }
+
+        const data = result.data;
+        const responseTimes = data.details?.response_times || [];
+        const totalTime = data.details?.total_time || 0;
+        const throughput = totalTime > 0 ? data.request_count / (totalTime / 1000) : 0;
+        const minResponse = responseTimes.length ? Math.min(...responseTimes) : null;
+        const maxResponse = responseTimes.length ? Math.max(...responseTimes) : null;
+
+        return `
+            <div class="bg-gray-50 border border-gray-200 rounded-lg p-4 space-y-3">
+                <div>
+                    <h4 class="font-semibold text-gray-800">${result.label}</h4>
+                    <p class="text-xs text-gray-500 uppercase tracking-wide">${result.cache ? 'Cache Enabled (Integrated)' : 'Cache Disabled'}</p>
+                    <span class="inline-flex items-center px-2 py-0.5 mt-2 text-xs font-semibold rounded-full bg-green-100 text-green-800">Berhasil</span>
+                </div>
+                <div class="space-y-1 text-sm text-gray-700">
+                    <p><span class="font-medium text-gray-600">Avg. Response:</span> ${renderValue(data.avg_response_time_ms, ' ms')}</p>
+                    <p><span class="font-medium text-gray-600">CPU Usage:</span> ${renderValue(data.cpu_usage_percent, ' %')}</p>
+                    <p><span class="font-medium text-gray-600">Memory Usage:</span> ${renderValue(data.memory_usage_percent, ' %')}</p>
+                </div>
+                <div class="space-y-1 text-sm text-gray-700">
+                    <p><span class="font-medium text-gray-600">Throughput:</span> ${renderValue(throughput, ' req/s')}</p>
+                    <p><span class="font-medium text-gray-600">Total Time:</span> ${renderValue(totalTime, ' ms')}</p>
+                </div>
+                <div class="space-y-1 text-sm text-gray-700">
+                    <p><span class="font-medium text-gray-600">Min Response:</span> ${renderValue(minResponse, ' ms')}</p>
+                    <p><span class="font-medium text-gray-600">Max Response:</span> ${renderValue(maxResponse, ' ms')}</p>
+                </div>
+            </div>
+        `;
+    }).join('');
+
     modal.innerHTML = `
         <div class="relative top-20 mx-auto p-5 border w-11/12 md:w-3/4 lg:w-1/2 shadow-lg rounded-md bg-white">
             <div class="flex justify-between items-center border-b pb-3">
                 <h3 class="text-xl font-semibold text-gray-900">Hasil Uji Performa</h3>
-                <button onclick="closePerformanceModal()" class="text-gray-400 hover:text-gray-500">
+                <button onclick="closePerformanceSummaryModal()" class="text-gray-400 hover:text-gray-500">
                     <i class="fas fa-times"></i>
                 </button>
             </div>
             <div class="mt-4">
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                    <div class="bg-gray-50 p-4 rounded-lg">
-                        <h4 class="font-semibold text-gray-700 mb-2">Info Pengujian</h4>
-                        <p><span class="text-gray-600">Query ID:</span> <span class="font-medium">${data.query_id}</span></p>
-                        <p><span class="text-gray-600">Tipe API:</span> <span class="font-medium">${data.api_type.toUpperCase()}</span></p>
-                        <p><span class="text-gray-600">Jumlah Request:</span> <span class="font-medium">${data.request_count}</span></p>
-                    </div>
-                    <div class="bg-gray-50 p-4 rounded-lg">
-                        <h4 class="font-semibold text-gray-700 mb-2">Hasil Performa</h4>
-                        <p><span class="text-gray-600">Rata-rata Waktu:</span> <span class="font-medium">${data.avg_response_time_ms.toFixed(2)} ms</span></p>
-                        <p><span class="text-gray-600">CPU Usage:</span> <span class="font-medium">${data.cpu_usage_percent.toFixed(2)}%</span></p>
-                        <p><span class="text-gray-600">Memory Usage:</span> <span class="font-medium">${data.memory_usage_percent.toFixed(2)}%</span></p>
+                <div class="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-4">
+                    <h4 class="font-semibold text-gray-700 mb-2">Ringkasan Pengujian</h4>
+                    <div class="flex flex-wrap gap-4 text-sm text-gray-700">
+                        <p><span class="font-medium">Query ID:</span> ${query_id}</p>
+                        <p><span class="font-medium">Jumlah Request:</span> ${request_count}</p>
+                        <p><span class="font-medium">Batch ID:</span> ${batch_id}</p>
+                        <p><span class="font-medium">Timestamp:</span> ${new Date().toLocaleString()}</p>
                     </div>
                 </div>
-                <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                    <h4 class="font-semibold text-blue-800 mb-2">Metrik Performa API Gateway</h4>
-                    <div class="grid grid-cols-2 gap-3">
-                        <div>
-                            <p><span class="text-blue-700">Total Waktu:</span> <span class="font-medium">${totalTime.toFixed(2)} ms</span></p>
-                            <p><span class="text-blue-700">Throughput:</span> <span class="font-medium">${throughput.toFixed(2)} req/s</span></p>
-                        </div>
-                        <div>
-                            <p><span class="text-blue-700">Min Response:</span> <span class="font-medium">${minResponse.toFixed(2)} ms</span></p>
-                            <p><span class="text-blue-700">Max Response:</span> <span class="font-medium">${maxResponse.toFixed(2)} ms</span></p>
-                        </div>
-                    </div>
-                    <p class="mt-2"><span class="text-blue-700">Pengujian Selesai:</span> <span class="font-medium">${new Date().toLocaleString()}</span></p>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    ${cardsHtml}
                 </div>
             </div>
             <div class="mt-6 flex justify-end">
-                <button onclick="closePerformanceModal()" class="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-300">
+                <button onclick="closePerformanceSummaryModal()" class="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-300">
                     Tutup
                 </button>
             </div>
         </div>
     `;
-    
+
     document.body.appendChild(modal);
-    
-    // Add close function to global scope
-    window.closePerformanceModal = function() {
+
+    window.closePerformanceSummaryModal = function() {
         document.body.removeChild(modal);
-        delete window.closePerformanceModal;
+        delete window.closePerformanceSummaryModal;
     };
-}
-
-// Data real dari database - tidak ada data sample
-
-// API Comparison Chart Variable
-let apiComparisonChart;
-
-// Initialize API Comparison Chart
-function initializeComparisonCharts() {
-    const ctx = document.getElementById('apiComparisonChart').getContext('2d');
-    apiComparisonChart = new Chart(ctx, {
-        type: 'bar',
-        data: {
-            labels: ['REST API', 'GraphQL API', 'Integrated API'],
-            datasets: [
-                {
-                    label: 'Response Time (ms)',
-                    data: [0, 0, 0],
-                    backgroundColor: 'rgba(59, 130, 246, 0.6)',
-                    borderColor: 'rgba(59, 130, 246, 1)',
-                    borderWidth: 2,
-                    yAxisID: 'y'
-                },
-                {
-                    label: 'CPU Usage (%)',
-                    data: [0, 0, 0],
-                    backgroundColor: 'rgba(239, 68, 68, 0.6)',
-                    borderColor: 'rgba(239, 68, 68, 1)',
-                    borderWidth: 2,
-                    yAxisID: 'y1'
-                },
-                {
-                    label: 'Memory Usage (%)',
-                    data: [0, 0, 0],
-                    backgroundColor: 'rgba(251, 146, 60, 0.6)',
-                    borderColor: 'rgba(251, 146, 60, 1)',
-                    borderWidth: 2,
-                    yAxisID: 'y1'
-                }
-            ]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            interaction: {
-                mode: 'index',
-                intersect: false
-            },
-            plugins: {
-                legend: {
-                    display: true,
-                    position: 'top'
-                },
-                title: {
-                    display: true,
-                    text: 'Perbandingan Performa API (Data Real dari Database)',
-                    font: {
-                        size: 16
-                    }
-                }
-            },
-            scales: {
-                y: {
-                    type: 'linear',
-                    display: true,
-                    position: 'left',
-                    beginAtZero: true,
-                    title: {
-                        display: true,
-                        text: 'Response Time (ms)'
-                    }
-                },
-                y1: {
-                    type: 'linear',
-                    display: true,
-                    position: 'right',
-                    beginAtZero: true,
-                    title: {
-                        display: true,
-                        text: 'CPU (%) & Memory (%)'
-                    },
-                    grid: {
-                        drawOnChartArea: false
-                    }
-                }
-            }
-        }
-    });
-}
-
-// Update comparison chart with real data from database
-function updateComparisonCharts(data) {
-    if (!apiComparisonChart) {
-        console.error('Chart not initialized');
-        return;
-    }
-    
-    // Update dataset dengan data real dari database
-    const responseTimes = [
-        Number(data.rest.response_time) || 0,
-        Number(data.graphql.response_time) || 0,
-        Number(data.integrated.response_time) || 0
-    ];
-
-    const cpuUsage = [
-        Number(data.rest.cpu_usage) || 0,
-        Number(data.graphql.cpu_usage) || 0,
-        Number(data.integrated.cpu_usage) || 0
-    ];
-
-    const memoryUsage = [
-        Number(data.rest.memory_usage) || 0,
-        Number(data.graphql.memory_usage) || 0,
-        Number(data.integrated.memory_usage) || 0
-    ];
-
-    apiComparisonChart.data.datasets[0].data = responseTimes;
-    apiComparisonChart.data.datasets[1].data = cpuUsage;
-    apiComparisonChart.data.datasets[2].data = memoryUsage;
-
-    const responseMax = Math.max(...responseTimes);
-    const performanceMax = Math.max(...cpuUsage, ...memoryUsage);
-
-    apiComparisonChart.options.scales.y.suggestedMax = responseMax > 0 ? responseMax * 1.2 : 10;
-
-    if (performanceMax > 0) {
-        apiComparisonChart.options.scales.y1.suggestedMax = performanceMax * 1.2;
-        apiComparisonChart.options.scales.y1.max = undefined;
-    } else {
-        apiComparisonChart.options.scales.y1.suggestedMax = 10;
-        apiComparisonChart.options.scales.y1.max = undefined;
-    }
-    
-    apiComparisonChart.update();
-    
-    console.log('Chart updated with real data:', data);
-}
-
-// Historical data dari database - tidak digunakan untuk chart gabungan
-function updateHistoricalCharts(historicalData) {
-    // Data historis tersedia di console untuk debugging jika diperlukan
-    console.log('Historical data from database:', historicalData);
-    // Chart gabungan hanya menampilkan rata-rata, bukan data historis per waktu
-}
-
-// Fetch and update comparison data
-async function loadComparisonData() {
-    const querySelect = document.getElementById('comparison_query');
-    const queryId = querySelect.value;
-    const updateBtn = document.getElementById('updateComparisonBtn');
-
-    // Check if query is empty
-    if (!queryId || queryId === '') {
-        showNotification('Belum ada data pengujian. Silakan jalankan pengujian terlebih dahulu.', 'warning');
-        return;
-    }
-
-    // Show loading state
-    updateBtn.disabled = true;
-    updateBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Memuat...';
-
-    try {
-        console.log('Loading comparison data for query:', queryId);
-        const response = await fetch(`/api-comparison-data?query_id=${encodeURIComponent(queryId)}`);
-        const result = await response.json();
-
-        console.log('API Response:', result);
-
-        if (result.success) {
-            // Check if chart is initialized
-            if (typeof apiComparisonChart === 'undefined') {
-                console.error('Chart not initialized yet');
-                showNotification('Chart belum siap, coba lagi', 'error');
-                return;
-            }
-
-            // Update comparison chart with current data
-            updateComparisonCharts(result.data);
-
-            // Update historical charts if data available
-            if (result.historical) {
-                updateHistoricalCharts(result.historical);
-            }
-
-            // Update data info
-            updateDataInfo(result, queryId);
-
-            // Show success message
-            if (result.has_real_data) {
-                showNotification('Data perbandingan berhasil dimuat dari database!', 'success');
-            } else {
-                showNotification('Belum ada data pengujian untuk query ini. Silakan jalankan pengujian terlebih dahulu.', 'warning');
-            }
-
-        } else {
-            console.error('Error loading comparison data:', result.error);
-            showNotification('Gagal memuat data perbandingan: ' + result.error, 'error');
-        }
-    } catch (error) {
-        console.error('Error:', error);
-        showNotification('Terjadi kesalahan saat memuat data perbandingan: ' + error.message, 'error');
-    } finally {
-        // Reset button state
-        updateBtn.disabled = false;
-        updateBtn.innerHTML = '<i class="fas fa-sync mr-1"></i> Tampilkan Perbandingan';
-    }
-}
-
-// Function to update data info section
-function updateDataInfo(result, queryId) {
-    const dataInfo = document.getElementById('dataInfo');
-    const dataSourceText = document.getElementById('dataSourceText');
-    const currentQuery = document.getElementById('currentQuery');
-    const lastUpdated = document.getElementById('lastUpdated');
-    
-    if (dataInfo && dataSourceText && currentQuery && lastUpdated) {
-        dataSourceText.textContent = result.has_real_data ? 'Database Real' : 'Belum Ada Data';
-        currentQuery.textContent = queryId;
-        lastUpdated.textContent = new Date().toLocaleString();
-        
-        dataInfo.classList.remove('hidden');
-    }
 }
 
 // Helper function to show notifications
@@ -1110,44 +908,302 @@ function showNotification(message, type = 'info') {
     }, 3000);
 }
 
-// Initialize comparison charts when DOM is ready
-document.addEventListener('DOMContentLoaded', function() {
-    // Wait for Chart.js to be fully loaded
-    function checkChartJS() {
-        if (typeof Chart !== 'undefined') {
-            initializeComparisonCharts();
+const apiBarColors = {
+    REST: {
+        background: 'rgba(59, 130, 246, 0.7)',
+        border: 'rgba(37, 99, 235, 1)'
+    },
+    GraphQL: {
+        background: 'rgba(34, 197, 94, 0.7)',
+        border: 'rgba(22, 163, 74, 1)'
+    },
+    Integrated: {
+        background: 'rgba(168, 85, 247, 0.7)',
+        border: 'rgba(147, 51, 234, 1)'
+    }
+};
 
-            // Check if there's data available
-            const querySelect = document.getElementById('comparison_query');
-            const hasData = querySelect.options.length > 0 && querySelect.value !== '';
-            
-            // Load initial data only if available
-            if (hasData) {
-                loadComparisonData();
-            } else {
-                console.log('No comparison data available yet. Please run a test first.');
-            }
+const chartConfigs = [
+    {
+        canvasId: 'chartResponseTime',
+        title: 'Waktu (ms)',
+        key: 'response',
+        precision: 2
+    },
+    {
+        canvasId: 'chartCpuUsage',
+        title: 'Penggunaan CPU (%)',
+        key: 'cpu',
+        precision: 2
+    },
+    {
+        canvasId: 'chartMemoryUsage',
+        title: 'Penggunaan Memori (%)',
+        key: 'memory',
+        precision: 2
+    }
+];
 
-            // Add event listener for update button
-            document.getElementById('updateComparisonBtn').addEventListener('click', loadComparisonData);
-        } else {
-            // Retry after 100ms if Chart.js not ready
-            setTimeout(checkChartJS, 100);
-        }
+const dashboardCharts = {};
+let chartFilterInitialized = false;
+let currentPerformanceChartData = null;
+
+function initializePerformanceCharts(data) {
+    currentPerformanceChartData = data;
+    chartConfigs.forEach(config => buildAverageBarChart(config, data));
+    initChartFilterControls();
+}
+
+function updatePerformanceCharts(data) {
+    currentPerformanceChartData = data;
+    chartConfigs.forEach(config => buildAverageBarChart(config, data));
+}
+
+function initChartFilterControls() {
+    if (chartFilterInitialized) {
+        return;
     }
 
-    checkChartJS();
-});
+    const select = document.querySelector('[data-chart-filter]');
+    const button = document.querySelector('[data-chart-filter-button]');
+    if (!select) {
+        return;
+    }
+
+    const triggerRefresh = () => {
+        refreshDashboardCharts(select.value);
+    };
+
+    select.addEventListener('change', triggerRefresh);
+    if (button) {
+        button.addEventListener('click', triggerRefresh);
+    }
+
+    chartFilterInitialized = true;
+}
+
+function renderChartPlaceholder(canvasId) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas || !canvas.parentNode) {
+        return;
+    }
+
+    const container = canvas.parentNode;
+    let placeholder = container.querySelector('.chart-placeholder');
+    if (!placeholder) {
+        placeholder = document.createElement('p');
+        placeholder.className = 'chart-placeholder text-sm text-gray-500';
+        container.appendChild(placeholder);
+    }
+    placeholder.textContent = 'Belum ada data pengujian untuk ditampilkan.';
+    placeholder.classList.remove('hidden');
+    canvas.classList.add('hidden');
+
+    if (dashboardCharts[canvasId]) {
+        dashboardCharts[canvasId].destroy();
+        delete dashboardCharts[canvasId];
+    }
+}
+
+function hideChartPlaceholder(canvas) {
+    if (!canvas) {
+        return;
+    }
+    canvas.classList.remove('hidden');
+    const placeholder = canvas.parentNode?.querySelector('.chart-placeholder');
+    if (placeholder) {
+        placeholder.classList.add('hidden');
+    }
+}
+
+function buildAverageBarChart(config, data) {
+    const { canvasId, title, key, precision } = config;
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) {
+        return;
+    }
+
+    const labels = Array.isArray(data?.labels) ? data.labels : [];
+    const rawValues = Array.isArray(data?.[key]) ? data[key] : [];
+
+    if (labels.length === 0 || rawValues.length === 0) {
+        renderChartPlaceholder(canvasId);
+        return;
+    }
+
+    const sanitizedValues = rawValues.map(value => {
+        if (value === null || typeof value === 'undefined') {
+            return null;
+        }
+        const numeric = Number(value);
+        return Number.isNaN(numeric) ? null : numeric;
+    });
+
+    const numericValues = sanitizedValues.filter(value => typeof value === 'number' && !Number.isNaN(value));
+    const hasData = numericValues.length > 0;
+    if (!hasData) {
+        renderChartPlaceholder(canvasId);
+        return;
+    }
+
+    hideChartPlaceholder(canvas);
+
+    const backgroundColors = labels.map(label => apiBarColors[label]?.background || 'rgba(107, 114, 128, 0.6)');
+    const borderColors = labels.map(label => apiBarColors[label]?.border || 'rgba(75, 85, 99, 1)');
+
+    const maxValue = Math.max(...numericValues);
+    const dynamicMax = maxValue <= 0 ? 10 : maxValue * 1.15;
+
+    const ctx = canvas.getContext('2d');
+    const existingChart = dashboardCharts[canvasId];
+    if (existingChart) {
+        existingChart.data.labels = labels;
+        existingChart.data.datasets[0].data = sanitizedValues;
+        existingChart.data.datasets[0].backgroundColor = backgroundColors;
+        existingChart.data.datasets[0].borderColor = borderColors;
+        existingChart.options.scales.y.suggestedMax = dynamicMax;
+        existingChart.options.plugins.tooltip.callbacks.label = buildTooltipFormatter(precision);
+        existingChart.update();
+        return;
+    }
+
+    dashboardCharts[canvasId] = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels,
+            datasets: [
+                {
+                    label: 'Rata-rata',
+                    data: sanitizedValues,
+                    backgroundColor: backgroundColors,
+                    borderColor: borderColors,
+                    borderWidth: 1,
+                    maxBarThickness: 48
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                x: {
+                    grid: {
+                        display: false
+                    },
+                    ticks: {
+                        font: {
+                            size: 12,
+                            weight: '600'
+                        }
+                    }
+                },
+                y: {
+                    beginAtZero: true,
+                    suggestedMax: dynamicMax,
+                    title: {
+                        display: Boolean(title),
+                        text: title,
+                        font: {
+                            size: 12,
+                            weight: '500'
+                        }
+                    }
+                }
+            },
+            plugins: {
+                legend: {
+                    display: false
+                },
+                tooltip: {
+                    callbacks: {
+                        label: buildTooltipFormatter(precision)
+                    }
+                }
+            }
+        }
+    });
+}
+
+function buildTooltipFormatter(precision) {
+    return function(context) {
+        const value = context.parsed.y;
+        if (value === null || typeof value === 'undefined' || Number.isNaN(value)) {
+            return '-';
+        }
+        const decimals = typeof precision === 'number' ? precision : 2;
+        return `${value.toFixed(decimals)}`;
+    };
+}
+
+async function refreshDashboardCharts(queryId) {
+    const select = document.querySelector('[data-chart-filter]');
+    const button = document.querySelector('[data-chart-filter-button]');
+
+    const params = new URLSearchParams();
+    if (queryId) {
+        params.set('chart_query', queryId);
+    }
+
+    const url = `/dashboard-chart-data${params.toString() ? `?${params.toString()}` : ''}`;
+
+    try {
+        if (select) {
+            select.disabled = true;
+        }
+        if (button) {
+            button.disabled = true;
+            button.classList.add('opacity-75', 'cursor-not-allowed');
+        }
+
+        const response = await fetch(url, {
+            headers: {
+                'Accept': 'application/json'
+            }
+        });
+
+        const result = await response.json();
+        if (result.success) {
+            updatePerformanceCharts(result.data);
+        } else {
+            showNotification(result.error || 'Gagal memuat data performa.', 'error');
+        }
+    } catch (error) {
+        console.error('Error refreshing chart data:', error);
+        showNotification('Terjadi kesalahan saat memuat data performa.', 'error');
+    } finally {
+        if (select) {
+            select.disabled = false;
+        }
+        if (button) {
+            button.disabled = false;
+            button.classList.remove('opacity-75', 'cursor-not-allowed');
+        }
+    }
+}
 
 // Function to show test details modal
-async function showTestDetails(queryId, testDate, apiType = 'all') {
+async function showBatchDetails(batchId, queryId, testDate = null, apiType = 'all') {
     try {
-        const response = await fetch(`/test-details?query_id=${encodeURIComponent(queryId)}&test_date=${encodeURIComponent(testDate)}&api_type=${encodeURIComponent(apiType)}`);
+        const params = new URLSearchParams({
+            api_type: apiType
+        });
+
+        if (batchId) {
+            params.set('batch_id', batchId);
+        } else {
+            params.set('query_id', queryId);
+            if (testDate) {
+                params.set('test_date', testDate);
+            }
+        }
+
+        const response = await fetch(`/test-details?${params.toString()}`);
         const result = await response.json();
         
         if (result.success) {
             // Update modal title
-            document.getElementById('testDetailsTitle').textContent = `Detail Pengujian ${queryId} - ${testDate}`;
+            const batchLabel = batchId || (testDate ? `Tanggal ${testDate}` : 'Riwayat');
+            document.getElementById('testDetailsTitle').textContent = `Detail Pengujian ${queryId} - ${batchLabel}`;
             
             // Update statistics
             document.getElementById('totalTests').textContent = result.stats.total_tests;
@@ -1167,7 +1223,11 @@ async function showTestDetails(queryId, testDate, apiType = 'all') {
                     ? Number(test.graphql_response_time_ms).toFixed(2) + ' ms'
                     : '-';
                 
-                const cacheLabel = (test.cache_status || 'MISS').toUpperCase();
+                let cacheLabelRaw = (test.cache_status || 'MISS').toUpperCase();
+                if (cacheLabelRaw === 'WINNER_REFRESH') {
+                    cacheLabelRaw = 'HIT';
+                }
+                const cacheLabel = cacheLabelRaw === 'DISABLED' ? '-' : cacheLabelRaw;
                 const cacheClass =
                     cacheLabel === 'HIT' || cacheLabel === 'CACHE_USED'
                         ? 'bg-purple-100 text-purple-800'
@@ -1177,7 +1237,9 @@ async function showTestDetails(queryId, testDate, apiType = 'all') {
                                 ? 'bg-indigo-100 text-indigo-800'
                                 : cacheLabel === 'WINNER_ONLY'
                                     ? 'bg-blue-100 text-blue-800'
-                                    : 'bg-yellow-100 text-yellow-800';
+                                    : cacheLabel === '-'
+                                        ? 'bg-gray-100 text-gray-500'
+                                        : 'bg-yellow-100 text-yellow-800';
                 const cpuUsage = test.cpu_usage !== null && test.cpu_usage !== undefined
                     ? Number(test.cpu_usage).toFixed(2) + '%'
                     : '-';
@@ -1221,38 +1283,6 @@ function closeTestDetailsModal() {
     document.getElementById('testDetailsModal').classList.add('hidden');
 }
 
-// Tab switching functionality for test history
-document.addEventListener('DOMContentLoaded', function() {
-    const tabButtons = document.querySelectorAll('.tab-button');
-    const tabContents = document.querySelectorAll('.tab-content');
-
-    tabButtons.forEach(button => {
-        button.addEventListener('click', function() {
-            const tabName = this.getAttribute('data-tab');
-
-            // Remove active class from all buttons
-            tabButtons.forEach(btn => {
-                btn.classList.remove('border-primary-500', 'text-primary-600');
-                btn.classList.add('border-transparent', 'text-gray-500');
-            });
-
-            // Add active class to clicked button
-            this.classList.remove('border-transparent', 'text-gray-500');
-            this.classList.add('border-primary-500', 'text-primary-600');
-
-            // Hide all tab contents
-            tabContents.forEach(content => {
-                content.classList.add('hidden');
-            });
-
-            // Show selected tab content
-            const selectedContent = document.getElementById('tab-content-' + tabName);
-            if (selectedContent) {
-                selectedContent.classList.remove('hidden');
-            }
-        });
-    });
-});
 </script>
 
 <!-- Tambahkan Prism.js untuk syntax highlighting -->

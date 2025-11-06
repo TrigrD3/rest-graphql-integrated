@@ -14,6 +14,7 @@ class RequestLog extends Model
         'endpoint',
         'cache_status',
         'winner_api',
+        'batch_id',
         'cpu_usage',
         'memory_usage',
         'complexity',

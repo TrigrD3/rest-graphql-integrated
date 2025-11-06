@@ -13,6 +13,7 @@ Route::post('/run-batch-test', [DashboardController::class, 'runBatchTest']);
 Route::post('/run-performance-test', [DashboardController::class, 'runPerformanceTest']);
 Route::get('/api-comparison-data', [DashboardController::class, 'getApiComparisonData']);
 Route::get('/logs', [DashboardController::class, 'showLogs']);
+Route::get('/dashboard-chart-data', [DashboardController::class, 'getDashboardChartData']);
 
 // Route untuk fitur pengukuran performa
 Route::get('/performance', [PerformanceMetricController::class, 'index']);

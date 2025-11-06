@@ -7,6 +7,8 @@ use App\Models\PerformanceMetric;
 use App\Services\ApiGatewayService;
 use App\Services\SystemMetricsService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Cache;
@@ -22,7 +24,7 @@ class DashboardController extends Controller
         $this->systemMetricsService = $systemMetricsService;
     }
     
-    public function index()
+    public function index(Request $request)
     {
         // Cache metrics untuk 1 menit agar dashboard lebih cepat
         $metrics = Cache::remember('dashboard_metrics', 60, function () {
@@ -34,67 +36,36 @@ class DashboardController extends Controller
             return $this->getChartData();
         });
         
-        // Mengambil riwayat pengujian terbaru terpisah per API type
-        $recent_rest_tests = RequestLog::selectRaw('
-            query_id,
-            MAX(created_at) as latest_test_time,
-            AVG(rest_response_time_ms) as avg_rest_time,
-            COUNT(*) as test_count,
-            MAX(cache_status) as cache_status,
-            "rest" as api_type
-        ')
-        ->where('rest_response_time_ms', '>', 0)
-        ->groupBy('query_id', DB::raw('DATE(created_at)'))
-        ->orderBy('latest_test_time', 'desc')
-        ->take(5)
-        ->get();
+        $chartQueryId = $request->input('chart_query') ?: null;
+        $chartQueryOptions = RequestLog::select('query_id')
+            ->whereNotNull('query_id')
+            ->distinct()
+            ->orderBy('query_id')
+            ->pluck('query_id')
+            ->toArray();
 
-        $recent_graphql_tests = RequestLog::selectRaw('
-            query_id,
-            MAX(created_at) as latest_test_time,
-            AVG(graphql_response_time_ms) as avg_graphql_time,
-            COUNT(*) as test_count,
-            MAX(cache_status) as cache_status,
-            "graphql" as api_type
-        ')
-        ->where('graphql_response_time_ms', '>', 0)
-        ->groupBy('query_id', DB::raw('DATE(created_at)'))
-        ->orderBy('latest_test_time', 'desc')
-        ->take(5)
-        ->get();
+        $aggregatedBatches = $this->buildAggregatedBatches();
+        $sortedBatches = $aggregatedBatches->sortByDesc('created_at')->values();
 
-        $recent_integrated_tests = RequestLog::selectRaw('
-            query_id,
-            MAX(created_at) as latest_test_time,
-            AVG(rest_response_time_ms) as avg_rest_time,
-            AVG(graphql_response_time_ms) as avg_graphql_time,
-            COUNT(*) as test_count,
-            MAX(winner_api) as latest_winner,
-            MAX(cache_status) as cache_status,
-            "integrated" as api_type
-        ')
-        ->where('response_body', 'LIKE', '%"integrated_api":true%')
-        ->groupBy('query_id', DB::raw('DATE(created_at)'))
-        ->orderBy('latest_test_time', 'desc')
-        ->take(5)
-        ->get();
+        $historyPerPage = (int) $request->input('history_per_page', 10);
+        $historyPerPage = max(1, min(50, $historyPerPage));
+        $historyPageName = 'history_page';
+        $currentPage = LengthAwarePaginator::resolveCurrentPage($historyPageName);
 
-        // Mengambil riwayat pengujian terbaru - GRUPKAN berdasarkan query_id dan created_at (untuk tab ALL)
-        $recent_tests = RequestLog::selectRaw('
-            query_id,
-            MAX(created_at) as latest_test_time,
-            AVG(rest_response_time_ms) as avg_rest_time,
-            AVG(graphql_response_time_ms) as avg_graphql_time,
-            COUNT(*) as test_count,
-            MAX(winner_api) as latest_winner,
-            MAX(cache_status) as cache_status,
-            "all" as api_type
-        ')
-        ->groupBy('query_id', DB::raw('DATE(created_at)'))
-        ->orderBy('latest_test_time', 'desc')
-        ->take(10)
-        ->get();
-            
+        $historyItems = $sortedBatches->slice(($currentPage - 1) * $historyPerPage, $historyPerPage)->values();
+        $recent_batches = new LengthAwarePaginator(
+            $historyItems,
+            $sortedBatches->count(),
+            $historyPerPage,
+            $currentPage,
+            [
+                'path' => LengthAwarePaginator::resolveCurrentPath(),
+                'pageName' => $historyPageName,
+            ]
+        );
+
+        $performanceCharts = $this->calculatePerformanceChartData($sortedBatches, $chartQueryId);
+        
         $availableQueries = $this->getAvailableQueries();
         $queryDetails = [];
         foreach ($availableQueries as $id => $description) {
@@ -109,7 +80,259 @@ class DashboardController extends Controller
         // Ambil query yang memiliki data di database untuk dropdown perbandingan
         $availableComparisonQueries = $this->getQueriesWithData();
             
-        return view('dashboard', compact('metrics', 'chart_data', 'recent_tests', 'recent_rest_tests', 'recent_graphql_tests', 'recent_integrated_tests', 'availableQueries', 'queryDetails', 'availableComparisonQueries'));
+        return view('dashboard', [
+            'metrics' => $metrics,
+            'chart_data' => $chart_data,
+            'recent_batches' => $recent_batches,
+            'performanceCharts' => $performanceCharts,
+            'chartQueryId' => $chartQueryId,
+            'chartQueryOptions' => $chartQueryOptions,
+            'availableQueries' => $availableQueries,
+            'queryDetails' => $queryDetails,
+            'availableComparisonQueries' => $availableComparisonQueries,
+        ]);
+    }
+    
+    private function buildAggregatedBatches(?int $logLimit = 400)
+    {
+        $query = RequestLog::orderBy('created_at', 'desc');
+        if ($logLimit) {
+            $query->limit($logLimit);
+        }
+
+        $logs = $query->get();
+
+        return $logs->groupBy(function ($log) {
+                return $log->batch_id ?: 'legacy-' . $log->id;
+            })
+            ->map(function ($logs) {
+                $sortedLogs = $logs->sortBy('created_at');
+                $firstLog = $sortedLogs->first();
+                $lastLog = $sortedLogs->last();
+
+                if (!$firstLog) {
+                    return null;
+                }
+
+                $isLegacy = empty($firstLog->batch_id);
+                $displayBatchId = $firstLog->batch_id
+                    ? $firstLog->batch_id
+                    : sprintf(
+                        'LEGACY-%s-%s',
+                        $firstLog->created_at?->format('YmdHis') ?? 'NA',
+                        $firstLog->id
+                    );
+
+                $categorized = [
+                    'rest' => collect(),
+                    'graphql' => collect(),
+                    'integrated' => collect(),
+                ];
+
+                foreach ($logs as $log) {
+                    $responseBody = json_decode($log->response_body, true);
+
+                    if (is_array($responseBody) && ($responseBody['integrated_api'] ?? false)) {
+                        $categorized['integrated']->push($log);
+                        continue;
+                    }
+
+                    if (is_array($responseBody) && ($responseBody['single_api'] ?? false)) {
+                        $apiType = $responseBody['api_type'] ?? null;
+                        if (in_array($apiType, ['rest', 'graphql'], true)) {
+                            $categorized[$apiType]->push($log);
+                            continue;
+                        }
+                    }
+
+                    $endpoint = strtolower($log->endpoint ?? '');
+                    if (str_contains($endpoint, 'rest')) {
+                        $categorized['rest']->push($log);
+                    } elseif (str_contains($endpoint, 'graphql')) {
+                        $categorized['graphql']->push($log);
+                    } else {
+                        $categorized['integrated']->push($log);
+                    }
+                }
+
+                $summarize = function ($collection, $apiType) {
+                    $collection = collect($collection);
+
+                    if ($collection->isEmpty()) {
+                        return null;
+                    }
+
+                    $latest = $collection->sortByDesc('created_at')->first();
+
+                    $responseTimes = $collection->map(function ($log) use ($apiType) {
+                        switch ($apiType) {
+                            case 'rest':
+                                return $log->rest_response_time_ms;
+                            case 'graphql':
+                                return $log->graphql_response_time_ms;
+                            case 'integrated':
+                                $body = json_decode($log->response_body, true);
+                                if (is_array($body) && isset($body['total_response_time_ms'])) {
+                                    return $body['total_response_time_ms'];
+                                }
+
+                                $restTime = $log->rest_response_time_ms;
+                                $graphqlTime = $log->graphql_response_time_ms;
+
+                                if (!is_null($restTime) && !is_null($graphqlTime)) {
+                                    return max($restTime, $graphqlTime);
+                                }
+
+                                return $restTime ?? $graphqlTime;
+                        }
+
+                        return null;
+                    })->filter(fn ($value) => !is_null($value));
+
+                    $avgResponseTime = $responseTimes->isNotEmpty()
+                        ? round($responseTimes->avg(), 2)
+                        : null;
+
+                    $avgCpu = $collection->avg('cpu_usage');
+                    $avgMemory = $collection->avg('memory_usage');
+
+                    $selectedApi = null;
+                    if ($apiType === 'integrated' && $latest) {
+                        $latestBody = json_decode($latest->response_body, true);
+                        $selectedApi = is_array($latestBody) ? ($latestBody['selected_api'] ?? null) : null;
+                    }
+
+                    $cacheStatus = strtoupper($latest->cache_status ?? '');
+                    if ($cacheStatus === 'WINNER_REFRESH') {
+                        $cacheStatus = 'HIT';
+                    } elseif ($cacheStatus === 'DISABLED') {
+                        $cacheStatus = '-';
+                    } elseif ($cacheStatus === '') {
+                        $cacheStatus = '-';
+                    }
+
+                    return [
+                        'count' => $collection->count(),
+                        'avg_response_time_ms' => $avgResponseTime,
+                        'avg_cpu_usage' => !is_null($avgCpu) ? round($avgCpu, 2) : null,
+                        'avg_memory_usage' => !is_null($avgMemory) ? round($avgMemory, 2) : null,
+                        'cache_status' => $cacheStatus,
+                        'winner_api' => $latest->winner_api,
+                        'selected_api' => $selectedApi,
+                    ];
+                };
+
+                return [
+                    'batch_id' => $firstLog->batch_id,
+                    'display_batch_id' => $displayBatchId,
+                    'is_legacy' => $isLegacy,
+                    'query_id' => $firstLog->query_id,
+                    'created_at' => $lastLog?->created_at ?? $firstLog->created_at,
+                    'created_date' => ($lastLog?->created_at ?? $firstLog->created_at)?->toDateString(),
+                    'summaries' => [
+                        'rest' => $summarize($categorized['rest'], 'rest'),
+                        'graphql' => $summarize($categorized['graphql'], 'graphql'),
+                        'integrated' => $summarize($categorized['integrated'], 'integrated'),
+                    ],
+                ];
+            })
+            ->filter()
+            ->values();
+    }
+
+    private function calculatePerformanceChartData($batches, ?string $chartQueryId = null): array
+    {
+        if ($chartQueryId) {
+            $batches = $batches->filter(function ($entry) use ($chartQueryId) {
+                return ($entry['query_id'] ?? null) === $chartQueryId;
+            })->values();
+        }
+
+        $apiTypes = ['rest', 'graphql', 'integrated'];
+        $apiLabels = [
+            'rest' => 'REST',
+            'graphql' => 'GraphQL',
+            'integrated' => 'Integrated',
+        ];
+
+        $responseSeries = [
+            'rest' => [],
+            'graphql' => [],
+            'integrated' => [],
+        ];
+        $cpuSeries = [
+            'rest' => [],
+            'graphql' => [],
+            'integrated' => [],
+        ];
+        $memorySeries = [
+            'rest' => [],
+            'graphql' => [],
+            'integrated' => [],
+        ];
+
+        foreach ($batches as $entry) {
+            $summaries = $entry['summaries'] ?? [];
+            foreach ($apiTypes as $apiType) {
+                $summary = $summaries[$apiType] ?? null;
+                $responseSeries[$apiType][] = $summary['avg_response_time_ms'] ?? null;
+                $cpuSeries[$apiType][] = $summary['avg_cpu_usage'] ?? null;
+                $memorySeries[$apiType][] = $summary['avg_memory_usage'] ?? null;
+            }
+        }
+
+        $computeAverage = function (array $values) {
+            $filtered = collect($values)->filter(function ($value) {
+                return !is_null($value);
+            });
+
+            if ($filtered->isEmpty()) {
+                return null;
+            }
+
+            return round($filtered->avg(), 2);
+        };
+
+        $responseAverages = [];
+        $cpuAverages = [];
+        $memoryAverages = [];
+
+        foreach ($apiTypes as $apiType) {
+            $responseAverages[] = $computeAverage($responseSeries[$apiType]);
+            $cpuAverages[] = $computeAverage($cpuSeries[$apiType]);
+            $memoryAverages[] = $computeAverage($memorySeries[$apiType]);
+        }
+
+        return [
+            'labels' => array_values($apiLabels),
+            'response' => $responseAverages,
+            'cpu' => $cpuAverages,
+            'memory' => $memoryAverages,
+        ];
+    }
+
+    public function getDashboardChartData(Request $request)
+    {
+        try {
+            $chartQueryId = $request->input('chart_query') ?: null;
+
+            $aggregatedBatches = $this->buildAggregatedBatches();
+            $chartData = $this->calculatePerformanceChartData($aggregatedBatches, $chartQueryId);
+
+            return response()->json([
+                'success' => true,
+                'data' => $chartData
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Exception in getDashboardChartData: ' . $e->getMessage(), [
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'error' => 'Terjadi kesalahan: ' . $e->getMessage()
+            ], 500);
+        }
     }
     
     public function startTest(Request $request)
@@ -232,13 +455,15 @@ class DashboardController extends Controller
                 'query_id' => 'required|string',
                 'api_type' => 'required|in:rest,graphql,integrated',
                 'request_count' => 'required|integer|min:1|max:1000',
-                'cache' => 'required|boolean'
+                'cache' => 'required|boolean',
+                'batch_id' => 'nullable|string'
             ]);
             
             $queryId = $request->input('query_id');
             $apiType = $request->input('api_type');
             $requestCount = $request->input('request_count');
             $useCache = $request->boolean('cache', true);
+            $batchId = $request->input('batch_id');
 
             if ($useCache) {
                 $this->apiGatewayService->clearCacheForQuery($queryId, null);
@@ -256,7 +481,7 @@ class DashboardController extends Controller
                 $requestStartTime = microtime(true);
                 
                 // Execute API request
-                $response = $this->executeApiRequest($queryId, $apiType, $useCache);
+                $response = $this->executeApiRequest($queryId, $apiType, $useCache, $batchId);
                 
                 $requestEndTime = microtime(true);
                 $responseTimes[] = ($requestEndTime - $requestStartTime) * 1000; // Convert to ms
@@ -317,14 +542,14 @@ class DashboardController extends Controller
     /**
      * Execute API request based on type
      */
-    private function executeApiRequest($queryId, $apiType, bool $useCache = true)
+    private function executeApiRequest($queryId, $apiType, bool $useCache = true, ?string $batchId = null)
     {
         switch ($apiType) {
             case 'rest':
                 $result = $this->apiGatewayService->executeRestApi($queryId, null, $useCache);
                 
                 // Log the REST test result to RequestLog for history tracking
-                $this->logSingleApiResult($queryId, 'rest', $result, $useCache);
+                $this->logSingleApiResult($queryId, 'rest', $result, $useCache, $batchId);
                 
                 return [
                     'response_time_ms' => $result['response_time_ms'],
@@ -335,7 +560,7 @@ class DashboardController extends Controller
                 $result = $this->apiGatewayService->executeGraphqlApi($queryId, null, $useCache);
                 
                 // Log the GraphQL test result to RequestLog for history tracking
-                $this->logSingleApiResult($queryId, 'graphql', $result, $useCache);
+                $this->logSingleApiResult($queryId, 'graphql', $result, $useCache, $batchId);
                 
                 return [
                     'response_time_ms' => $result['response_time_ms'],
@@ -349,7 +574,7 @@ class DashboardController extends Controller
                 $result = $this->apiGatewayService->executeIntegratedApi($queryId, null, $usePromiseAny, $useCache);
                 
                 // Log this integrated test result to RequestLog for history tracking
-                $this->logIntegratedApiResult($result);
+                $this->logIntegratedApiResult($result, $batchId);
                 
                 return [
                     'response_time_ms' => $result['total_response_time_ms'] ?? 
@@ -604,7 +829,7 @@ class DashboardController extends Controller
     /**
      * Log integrated API test result to RequestLog for history tracking
      */
-    private function logIntegratedApiResult($result)
+    private function logIntegratedApiResult($result, ?string $batchId = null)
     {
         try {
             $cacheStatus = $result['cache_status'] ?? ($result['cache_used'] ? 'HIT' : 'MISS');
@@ -614,6 +839,7 @@ class DashboardController extends Controller
                 'endpoint' => "Integrated Query {$result['query_id']}",
                 'cache_status' => $cacheStatus,
                 'winner_api' => $result['winner_api'] ?? 'integrated',
+                'batch_id' => $batchId,
                 'cpu_usage' => $result['cpu_usage'] ?? 0,
                 'memory_usage' => $result['memory_usage'] ?? 0,
                 'rest_response_time_ms' => $result['rest_response_time_ms'] ?? 0,
@@ -633,6 +859,7 @@ class DashboardController extends Controller
             
             Log::info('Logged integrated API result to RequestLog', [
                 'query_id' => $result['query_id'],
+                'batch_id' => $batchId,
                 'execution_mode' => $result['execution_mode'] ?? 'unknown'
             ]);
         } catch (\Exception $e) {
@@ -645,7 +872,7 @@ class DashboardController extends Controller
     /**
      * Log single API test result (REST or GraphQL) to RequestLog for history tracking
      */
-    private function logSingleApiResult($queryId, $apiType, $result, bool $useCache = true)
+    private function logSingleApiResult($queryId, $apiType, $result, bool $useCache = true, ?string $batchId = null)
     {
         try {
             $cacheStatus = $result['cache_status'] ?? ($useCache ? 'MISS' : 'DISABLED');
@@ -658,6 +885,7 @@ class DashboardController extends Controller
                 'endpoint' => "{$apiType} Query {$queryId}",
                 'cache_status' => $cacheStatus,
                 'winner_api' => $result['succeeded'] ? $apiType : 'none',
+                'batch_id' => $batchId,
                 'cpu_usage' => $result['cpu_usage'] ?? 0,
                 'memory_usage' => $result['memory_usage'] ?? 0,
                 'rest_response_time_ms' => $apiType === 'rest' ? $responseTime : null,
@@ -680,6 +908,7 @@ class DashboardController extends Controller
             Log::info('Logged single API result to RequestLog', [
                 'query_id' => $queryId,
                 'api_type' => $apiType,
+                'batch_id' => $batchId,
                 'succeeded' => $result['succeeded'],
                 'cpu_usage' => $result['cpu_usage'] ?? null,
                 'memory_usage' => $result['memory_usage'] ?? null
@@ -811,20 +1040,25 @@ class DashboardController extends Controller
     public function getTestDetails(Request $request)
     {
         try {
+            $batchId = $request->input('batch_id');
             $queryId = $request->input('query_id');
             $testDate = $request->input('test_date');
             $apiType = $request->input('api_type', 'all');
 
-            if (!$queryId || !$testDate) {
+            if (!$batchId && (!$queryId || !$testDate)) {
                 return response()->json([
                     'success' => false,
-                    'error' => 'Query ID dan tanggal pengujian diperlukan'
+                    'error' => 'Batch ID atau kombinasi Query ID dan tanggal pengujian diperlukan'
                 ], 400);
             }
 
-            // Ambil detail pengujian berdasarkan query_id dan tanggal
-            $query = RequestLog::where('query_id', $queryId)
-                ->whereDate('created_at', $testDate);
+            if ($batchId) {
+                $query = RequestLog::where('batch_id', $batchId);
+            } else {
+                // Ambil detail pengujian berdasarkan query_id dan tanggal
+                $query = RequestLog::where('query_id', $queryId)
+                    ->whereDate('created_at', $testDate);
+            }
 
             // Filter berdasarkan API type jika tidak 'all'
             if ($apiType !== 'all') {
